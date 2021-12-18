@@ -1,5 +1,5 @@
 # **Лекция №4: Локальное окружение инженера. ChatOps и визуализация рабочих процессов. Командная работа с Git. Работа в GitHub**
-> _play-travis__
+> _play-travis_
 <details>
   <summary>Настройка локального окружения и практика ChatOps</summary>
 
@@ -17,10 +17,53 @@
 1 б. - задание выполнено
 2 б. - выполнены все дополнительные задания
 
-Рекомендуем сдать до: 15.12.2021
 ---
 
 ## **Выполнено:**
+1. Клонирование своего репозитория
+```
+git clone git@github.com:Otus-DevOps-2021-11/Deron-D_infra.git
+```
+
+2. Работа с ветками
+```
+cd Deron-D_infra
+git checkout -b play-travis
+```
+
+3. Добавление изменений. Функционал Pull Request Templates.
+```
+mkdir .github
+cd .github
+wget http://bit.ly/otus-pr-template -O PULL_REQUEST_TEMPLATE.md
+cd ..
+git add .
+git commit -am 'Add PULL_REQUEST_TEMPLATE.md'
+git push --set-upstream origin play-travis
+```
+4. Добавим функционал хука pre-commit
+- Выполним команды
+```
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py & python3 get-pip.py
+sudo pip3 install pre-commit
+```
+- Создадим в репозитории файл [.pre-commit-config.yaml](.pre-commit-config.yaml) со следующим содержимым
+```
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v2.3.0
+    hooks:
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+```
+- Выполним команду
+```
+pre-commit install
+pre-commit installed at .git/hooks/pre-commit
+```
+
+5. Отправим изменения
+
 
 ## **Полезное:**
 </details>
