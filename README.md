@@ -37,9 +37,6 @@ mkdir .github
 cd .github
 wget http://bit.ly/otus-pr-template -O PULL_REQUEST_TEMPLATE.md
 cd ..
-git add .
-git commit -am 'Add PULL_REQUEST_TEMPLATE.md'
-git push --set-upstream origin play-travis
 ```
 4. Добавим функционал хука pre-commit
 - Выполним команды
@@ -62,8 +59,15 @@ pre-commit install
 pre-commit installed at .git/hooks/pre-commit
 ```
 
-5. Отправим изменения
+5. Отправим изменения:
+```
+git add .
+git commit -am 'Add PR template'
+git push --set-upstream origin play-travis
+```
+6. Настройка интеграций используемых сервисов с чатом
 
+- Создадим канал [#dmitriy_pnev](https://devops-team-otus.slack.com/archives/CN8RWNKQR)
 
 ## **Полезное:**
 </details>
