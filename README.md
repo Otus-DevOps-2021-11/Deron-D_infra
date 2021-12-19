@@ -129,8 +129,8 @@ wget https://gist.githubusercontent.com/mrgreyves/d8815bcb7e00a2f0b26d0e0a48c556
 Критерии оценки:
 0 б. - задание не выполнено 1 б. - задание выполнено 2 б. - выполнены все дополнительные задания
 
-bastion_IP =
-someinternalhost_IP =
+bastion_IP = 84.252.136.193
+someinternalhost_IP = 10.129.0.25
 ---
 
 ## **Выполнено:**
