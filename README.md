@@ -341,6 +341,9 @@ Last login: Sun Dec 19 14:22:10 2021 from 10.129.0.34
 1 б. - задание выполнено
 2 б. - выполнены все дополнительные задания
 
+testapp_IP = 51.250.0.68
+testapp_port = 9292
+
 ---
 
 ## **Выполнено:**
@@ -431,7 +434,6 @@ users:
 runcmd:
   - wget https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/cloud-testapp/bootstrap.sh
   - bash bootstrap.sh
-
 ```
 
 Содержимое [bootstrap.sh](./bootstrap.sh):
@@ -445,11 +447,7 @@ sudo systemctl --now enable mongod
 git clone -b monolith https://github.com/express42/reddit.git
 cd reddit && bundle install
 puma -d
-
 ```
 
 # **Полезное:**
 </details>
-
-testapp_IP = 51.250.0.68
-testapp_port = 9292
