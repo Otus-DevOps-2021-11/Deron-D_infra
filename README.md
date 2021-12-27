@@ -375,6 +375,13 @@ yc compute instance create \
  --ssh-key ~/.ssh/appuser.pub
 ```
 
+- Установлен Ruby [install_ruby.sh](./install_ruby.sh):
+```
+#!/bin/bash
+sudo apt update
+sudo apt install -y ruby-full ruby-bundler build-essential
+```
+
 - Проверен Ruby и Bundler:
 ```
 $ ruby -v
