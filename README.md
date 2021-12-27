@@ -1,3 +1,6 @@
+testapp_IP = 51.250.0.68
+testapp_port = 9292
+
 # **Лекция №4: Локальное окружение инженера. ChatOps и визуализация рабочих процессов. Командная работа с Git. Работа в GitHub**
 > _play-travis_
 <details>
@@ -448,7 +451,3 @@ puma -d
 
 # **Полезное:**
 </details>
-
-
-testapp_IP = 51.250.0.68
-testapp_port = 9292
