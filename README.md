@@ -341,8 +341,8 @@ Last login: Sun Dec 19 14:22:10 2021 from 10.129.0.34
 1 б. - задание выполнено
 2 б. - выполнены все дополнительные задания
 
-testapp_IP =
-testapp_port =
+testapp_IP = 51.250.0.68
+testapp_port = 9292
 ---
 
 ## **Выполнено:**
@@ -452,5 +452,3 @@ puma -d
 
 # **Полезное:**
 </details>
-testapp_IP = 51.250.2.228
-testapp_port = 9292
