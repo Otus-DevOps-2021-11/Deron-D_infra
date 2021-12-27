@@ -452,3 +452,5 @@ puma -d
 
 # **Полезное:**
 </details>
+testapp_IP = 51.250.2.228
+testapp_port = 9292
