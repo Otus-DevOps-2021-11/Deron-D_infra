@@ -481,6 +481,54 @@ puma -d
 ---
 
 ## **Выполнено:**
+1. Установлен Packer:
+```bash
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo yum -y install packer
+➜  Deron-D_infra git:(packer-base) packer -v
+1.7.8
+```
+2. Создан сервисный аккаунт:
+```bash
+SVC_ACCT="svcuser"
+FOLDER_ID=$(yc config list | grep folder-id | cut -d ' ' -f 2)
+➜  Deron-D_infra git:(packer-base) yc iam service-account create --name $SVC_ACCT --folder-id $FOLDER_ID
+id: aje0m03rhn6s1lq4un9a
+folder_id: b1gu87e4thvariradsue
+created_at: "2021-12-30T21:37:09.317555534Z"
+name: svcuser
+```
+
+3. Делегированы права сервисному аккаунту для Packer
+```bash
+ACCT_ID=$(yc iam service-account get $SVC_ACCT | grep ^id | awk '{print $2}')
+➜  Deron-D_infra git:(packer-base) ✗ yc resource-manager folder add-access-binding --id $FOLDER_ID --role editor --service-account-id $ACCT_ID
+done (1s)
+```
+
+```bash
+
+```
+```bash
+
+```
+```bash
+
+```
+```bash
+
+```
+```bash
+
+```
+```bash
+
+```
+```bash
+
+```
+
 
 
 # **Полезное:**
