@@ -552,20 +552,20 @@ puma -d
 ```
 
 10. Построение bake-образа `*`
-- Создан [immutable.json](https://raw.githubusercontent.com/Otus-DevOps-2021-05/Deron-D_infra/packer-base/packer/immutable.json)
-- Создан systemd unit [puma.service](https://raw.githubusercontent.com/Otus-DevOps-2021-05/Deron-D_infra/packer-base/packer/files/puma.service)
+- Создан [immutable.json](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/immutable.json)
+- Создан systemd unit [puma.service](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/files/puma.service)
 - Запущена сборка
 ```
 packer build -var-file=./variables.json immutable.json
 ```
 - Проверка созданных образов:
-```
-➜  packer git:(packer-base) yc compute image list
+```bash
+➜  packer git:(packer-base) ✗ yc compute image list
 +----------------------+------------------------+-------------+----------------------+--------+
 |          ID          |          NAME          |   FAMILY    |     PRODUCT IDS      | STATUS |
 +----------------------+------------------------+-------------+----------------------+--------+
-| fd821hvkilmtrb7tbi2n | reddit-base-1624888205 | reddit-base | f2el9g14ih63bjul3ed3 | READY  |
-| fd8t49b4simvfj6crpta | reddit-full-1624909929 | reddit-full | f2el9g14ih63bjul3ed3 | READY  |
+| fd8h54ao679l7j00kmi7 | reddit-base-1641146829 | reddit-base | f2eprbl75mtak72k76c5 | READY  |
+| fd8vb8lcmbe116i8umkc | reddit-full-1641149015 | reddit-full | f2eprbl75mtak72k76c5 | READY  |
 +----------------------+------------------------+-------------+----------------------+--------+
 ```
 
