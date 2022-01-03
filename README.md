@@ -576,7 +576,7 @@ packer build -var-file=./variables.json immutable.json
 # **Полезное:**
 </details>
 
-# **Лекция №8: Модели управления инфраструктурой. Подготовка образов с помощью Packer**
+# **Лекция №8: Знакомство с Terraform**
 > _terraform-1_
 <details>
  <summary>Знакомство с Terraform</summary>
@@ -598,7 +598,237 @@ packer build -var-file=./variables.json immutable.json
 ---
 
 ## **Выполнено:**
+1. Установлен terraform 0.12.8 с помощью [terraform-switcher](https://github.com/warrensbox/terraform-switcher)
 
+```bash
+curl -L https://raw.githubusercontent.com/warrensbox/terraform-switcher/release/install.sh | sudo bash
+
+➜  Deron-D_infra git:(terraform-1) ✗ tfswitch
+Use the arrow keys to navigate: ↓ ↑ → ←
+? Select Terraform version:
+  ▸ 0.12.8 *recent
+
+terraform git:(terraform-1) ✗ terraform -v
+Terraform v0.12.8
+```
+
+2. В корне репозитория дополнили файл [.gitignore](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/.gitignore) содержимым:
+
+```github
+*.tfstate
+*.tfstate.*.backup
+*.tfstate.backup
+*.tfvars
+.terraform/
+```
+
+3. Узнаем свои параметры токена, идентификатора облака и каталога:
+
+```bash
+yc config list
+➜  Deron-D_infra git:(terraform-1) ✗ yc config list
+token: <OAuth или статический ключ сервисного аккаунта>
+cloud-id: <идентификатор облака>
+folder-id: <идентификатор каталога>
+compute-default-zone: ru-central1-a
+```
+
+4. Создадим сервисный аккаунт для работы terraform:
+
+```bash
+FOLDER_ID=$(yc config list | grep folder-id | awk '{print $2}')
+SRV_ACC=trfuser
+
+yc iam service-account create --name $SRV_ACC --folder-id $FOLDER_ID
+
+SRV_ACC_ID=$(yc iam service-account get $SRV_ACC | grep ^id | awk '{print $2}')
+
+yc resource-manager folder add-access-binding --id $FOLDER_ID --role editor --service-account-id $SRV_ACC_ID
+
+yc iam key create --service-account-id $SRV_ACC_ID --output ~/.yc_keys/key.json
+```
+
+5. Смотрим информацию о имени, семействе и id пользовательских образов своего каталога с помощью команды yc compute image list:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) yc compute image list
++----------------------+------------------------+-------------+----------------------+--------+
+|          ID          |          NAME          |   FAMILY    |     PRODUCT IDS      | STATUS |
++----------------------+------------------------+-------------+----------------------+--------+
+| fd8190armqc6lvi7l8bq | reddit-base-1641220903 | reddit-base | f2ejt2v5v2gt4lfcs9gb | READY  |
++----------------------+------------------------+-------------+----------------------+--------+
+```
+
+6. Cмотрим информацию о имени и id сети; подсетей своего каталога с помощью команд yc vpc network list; yc vpc subnet list:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ yc vpc network list
++----------------------+--------+
+|          ID          |  NAME  |
++----------------------+--------+
+| enpf84mr5ho6p6299th2 | my-net |
++----------------------+--------+
+
+➜  Deron-D_infra git:(terraform-1) ✗ yc vpc subnet list
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+|          ID          |         NAME         |      NETWORK ID      | ROUTE TABLE ID |     ZONE      |      RANGE      |
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+| b0c5fukgbccn94q1o2ja | my-net-ru-central1-c | enpf84mr5ho6p6299th2 |                | ru-central1-c | [10.130.0.0/24] |
+| e2l35j160p54h8m8k41u | my-net-ru-central1-b | enpf84mr5ho6p6299th2 |                | ru-central1-b | [10.129.0.0/24] |
+| e9bogf7vjavut5hrqrjl | my-net-ru-central1-a | enpf84mr5ho6p6299th2 |                | ru-central1-a | [10.128.0.0/24] |
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+```
+
+7. Правим main.tf до состояния:
+
+```terraform
+terraform {
+  required_version = "0.12.8"
+}
+
+provider "yandex" {
+  version                  = "0.35"
+  service_account_key_file = pathexpand("~/.yc_keys/key.json")
+  folder_id                = "b1gu87e4thvariradsue"
+  zone                     = "ru-central1-a"
+}
+
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      # Указать id образа созданного в предыдущем домашнем задании
+      image_id = "fd8190armqc6lvi7l8bq"
+    }
+  }
+  network_interface {
+    # Указан id подсети default-ru-central1-a
+    subnet_id = "e9bogf7vjavut5hrqrjl"
+    nat       = true
+  }
+}
+```
+
+8. Для того чтобы загрузить провайдер и начать его использовать выполняем следующую команду в
+директории terraform:
+
+```bash
+terraform init
+```
+
+9. Планируем изменения:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+
+------------------------------------------------------------------------
+
+An execution plan has been generated and is shown below.
+Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # yandex_compute_instance.app will be created
+  + resource "yandex_compute_instance" "app" {
+      + created_at                = (known after apply)
+      + folder_id                 = (known after apply)
+      + fqdn                      = (known after apply)
+      + hostname                  = (known after apply)
+      + id                        = (known after apply)
+      + name                      = "reddit-app"
+      + network_acceleration_type = "standard"
+      + platform_id               = "standard-v1"
+      + service_account_id        = (known after apply)
+      + status                    = (known after apply)
+      + zone                      = (known after apply)
+
+      + boot_disk {
+          + auto_delete = true
+          + device_name = (known after apply)
+          + disk_id     = (known after apply)
+          + mode        = (known after apply)
+
+          + initialize_params {
+              + description = (known after apply)
+              + image_id    = "fd8190armqc6lvi7l8bq"
+              + name        = (known after apply)
+              + size        = (known after apply)
+              + snapshot_id = (known after apply)
+              + type        = "network-hdd"
+            }
+        }
+
+      + network_interface {
+          + index          = (known after apply)
+          + ip_address     = (known after apply)
+          + ipv6           = (known after apply)
+          + ipv6_address   = (known after apply)
+          + mac_address    = (known after apply)
+          + nat            = true
+          + nat_ip_address = (known after apply)
+          + nat_ip_version = (known after apply)
+          + subnet_id      = "enpf84mr5ho6p6299th2"
+        }
+
+      + resources {
+          + core_fraction = 100
+          + cores         = 2
+          + memory        = 2
+        }
+
+      + scheduling_policy {
+          + preemptible = (known after apply)
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+```
+
+10. Создаем VM согласно описанию в манифесте main.tf:
+
+```bash
+➜  terraform git:(terraform-1) terraform apply -auto-approve
+yandex_compute_instance.app: Creating...
+yandex_compute_instance.app: Still creating... [10s elapsed]
+yandex_compute_instance.app: Still creating... [20s elapsed]
+yandex_compute_instance.app: Still creating... [30s elapsed]
+yandex_compute_instance.app: Still creating... [40s elapsed]
+yandex_compute_instance.app: Creation complete after 44s [id=fhmlc5re13c4l7j3pu5k]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+11. Смотрим внешний IP адрес созданного инстанса,
+```bash
+Deron-D_infra git:(terraform-1) ✗ terraform show | grep nat_ip_address
+        nat_ip_address = "62.84.119.129"
+```
+
+12. Пробуем подключиться по SSH:
+```
+➜  Deron-D_infra git:(terraform-1) ✗ ssh ubuntu@62.84.119.129
+The authenticity of host '62.84.119.129 (62.84.119.129)' can't be established.
+ECDSA key fingerprint is SHA256:EYLFosa66FgTBPXzrhuv1dMhZxZzDoISvtx1hWiGVks.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '62.84.119.129' (ECDSA) to the list of known hosts.
+ubuntu@62.84.119.129's password:
+
+```
 
 # **Полезное:**
 </details>
