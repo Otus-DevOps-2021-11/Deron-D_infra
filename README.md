@@ -820,7 +820,7 @@ Deron-D_infra git:(terraform-1) ✗ terraform show | grep nat_ip_address
 ```
 
 12. Пробуем подключиться по SSH:
-```
+```bash
 ➜  Deron-D_infra git:(terraform-1) ✗ ssh ubuntu@62.84.119.129
 The authenticity of host '62.84.119.129 (62.84.119.129)' can't be established.
 ECDSA key fingerprint is SHA256:EYLFosa66FgTBPXzrhuv1dMhZxZzDoISvtx1hWiGVks.
@@ -828,6 +828,97 @@ Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
 Warning: Permanently added '62.84.119.129' (ECDSA) to the list of known hosts.
 ubuntu@62.84.119.129's password:
 
+```
+
+13. Нужно определить SSH публичный ключ пользователя ubuntu в метаданных нашего инстанса добавив в main.tf:
+```terraform
+metadata = {
+ssh-keys = "ubuntu:${file("~/.ssh/appuser.pub")}"
+}
+```
+
+14. Проверяем:
+
+```bash
+ssh ubuntu@62.84.119.129 -i ~/.ssh/appuser -o StrictHostKeyChecking=no
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ECDSA key sent by the remote host is
+SHA256:oSlrlVZN4mfxcXIho/FezIPb3xXjMKJwX5E+85+wawI.
+Please contact your system administrator.
+Add correct host key in /home/dpp/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /home/dpp/.ssh/known_hosts:11
+Password authentication is disabled to avoid man-in-the-middle attacks.
+Keyboard-interactive authentication is disabled to avoid man-in-the-middle attacks.
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+* Documentation:  https://help.ubuntu.com
+* Management:     https://landscape.canonical.com
+* Support:        https://ubuntu.com/advantage
+```
+
+15. Создадим файл outputs.tf для управления выходными переменными с содержимым:
+```terraform
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+```
+
+16. Проверяем работоспособность outputs.tf:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ terraform refresh
+yandex_compute_instance.app: Refreshing state... [id=fhm08gs8ma628cvngi7m]
+
+Outputs:
+
+external_ip_address_app = 62.84.115.191
+```
+
+17. Добавляем provisioners в main.tf:
+
+```terraform
+provisioner "file" {
+  source = "files/puma.service"
+  destination = "/tmp/puma.service"
+}
+
+provisioner "remote-exec" {
+script = "files/deploy.sh"
+}
+```
+
+18. Создадим файл юнита для провижионинга [puma.service](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/files/puma.service)
+
+19. Добавляем секцию для определения паметров подключения привиженеров:
+
+```terraform
+connection {
+  type = "ssh"
+  host = yandex_compute_instance.app.network_interface.0.nat_ip_address
+  user = "ubuntu"
+  agent = false
+  # путь до приватного ключа
+  private_key = file("~/.ssh/appuser")
+  }
+```
+
+20. Проверяем работу провижинеров. Говорим terraform'y пересоздать ресурс VM при следующем
+применении изменений:
+
+```bash
+➜  terraform git:(terraform-1) ✗ terraform taint yandex_compute_instance.app
+Resource instance yandex_compute_instance.app has been marked as tainted.
+```
+
+21. Планируем и применяем изменения:
+
+```bash
+terraform plan
+terraform apply --auto-approve
 ```
 
 # **Полезное:**
