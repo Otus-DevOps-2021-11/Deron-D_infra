@@ -1,6 +1,3 @@
-testapp_IP = 51.250.0.68
-testapp_port = 9292
-
 # **Лекция №4: Локальное окружение инженера. ChatOps и визуализация рабочих процессов. Командная работа с Git. Работа в GitHub**
 > _play-travis_
 <details>
@@ -344,6 +341,9 @@ Last login: Sun Dec 19 14:22:10 2021 from 10.129.0.34
 1 б. - задание выполнено
 2 б. - выполнены все дополнительные задания
 
+testapp_IP = 51.250.0.68
+testapp_port = 9292
+
 ---
 
 ## **Выполнено:**
@@ -455,6 +455,124 @@ git clone -b monolith https://github.com/express42/reddit.git
 cd reddit && bundle install
 puma -d
 ```
+
+# **Полезное:**
+</details>
+
+# **Лекция №7: Модели управления инфраструктурой. Подготовка образов с помощью Packer**
+> _packer-base_
+<details>
+  <summary>Подготовка базового образа VM при помощи Packer</summary>
+
+## **Задание:**
+Подготовка базового образа VM при помощи Packer.
+
+Цель:
+В данном дз студент произведет сборку готового образа с уже установленным приложением при помощи Packer. Задеплоит приложение в Yandex compute cloud при помощи ранее подготовленного образа.
+В данном задании тренируются навыки: работы с Packer, работы с YC.
+
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+
+1. Установлен Packer:
+
+```bash
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo yum -y install packer
+➜  Deron-D_infra git:(packer-base) packer -v
+1.7.8
+```
+
+2.1. Создан сервисный аккаунт:
+```bash
+SVC_ACCT="svcuser"
+FOLDER_ID=$(yc config list | grep folder-id | cut -d ' ' -f 2)
+➜  Deron-D_infra git:(packer-base) yc iam service-account create --name $SVC_ACCT --folder-id $FOLDER_ID
+id: aje0m03rhn6s1lq4un9a
+folder_id: b1gu87e4thvariradsue
+created_at: "2021-12-30T21:37:09.317555534Z"
+name: svcuser
+```
+
+2.2. Делегированы права editor сервисному аккаунту для Packer
+```bash
+ACCT_ID=$(yc iam service-account get $SVC_ACCT | grep ^id | awk '{print $2}')
+➜  Deron-D_infra git:(packer-base) ✗ yc resource-manager folder add-access-binding --id $FOLDER_ID --role editor --service-account-id $ACCT_ID
+done (1s)
+```
+
+2.3. Создан service account key file
+```bash
+➜  Deron-D_infra git:(packer-base) ✗ yc iam key create --service-account-id $ACCT_ID --output ~/.yc_keys/key.json
+id: ajeovakc635hscjpiv3t
+service_account_id: aje0m03rhn6s1lq4un9a
+created_at: "2022-01-02T17:00:57.913576072Z"
+key_algorithm: RSA_2048
+
+➜  Deron-D_infra git:(packer-base) ✗ ll ~/.yc_keys
+итого 8,0K
+-rw-------. 1 dpp dpp 2,4K янв  2 20:00 key.json
+```
+
+3. Создан файла-шаблона Packer [ubuntu16.json](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/ubuntu16.json)
+
+4. Созданы скрипты для provisioners [install_ruby.sh](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/scripts/install_ruby.sh);[install_mongodb.sh](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/scripts/install_mongodb.sh)
+
+5. Выполнено параметризирование шаблона с применением [variables.json.example](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/variables.json.example)
+
+6. Выполнена проверка на ошибки
+```bash
+➜  packer git:(packer-base) ✗ packer validate -var-file=./variables.json ./ubuntu16.json
+The configuration is valid.
+```
+
+7. Произведен запуск сборки образа
+```bash
+packer build -var-file=./variables.json ./ubuntu16.json
+```
+
+8. Создана ВМ с использованием созданного образа
+
+9. Выполнено "дожаривание" ВМ для запуска приложения:
+```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone -b monolith https://github.com/express42/reddit.git
+cd reddit && bundle install
+puma -d
+```
+
+10. Построение bake-образа `*`
+- Создан [immutable.json](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/immutable.json)
+- Создан systemd unit [puma.service](https://raw.githubusercontent.com/Otus-DevOps-2021-11/Deron-D_infra/packer-base/packer/files/puma.service)
+- Запущена сборка
+```
+packer build -var-file=./variables.json immutable.json
+```
+- Проверка созданных образов:
+```bash
+➜  packer git:(packer-base) ✗ yc compute image list
++----------------------+------------------------+-------------+----------------------+--------+
+|          ID          |          NAME          |   FAMILY    |     PRODUCT IDS      | STATUS |
++----------------------+------------------------+-------------+----------------------+--------+
+| fd8h54ao679l7j00kmi7 | reddit-base-1641146829 | reddit-base | f2eprbl75mtak72k76c5 | READY  |
+| fd8vb8lcmbe116i8umkc | reddit-full-1641149015 | reddit-full | f2eprbl75mtak72k76c5 | READY  |
++----------------------+------------------------+-------------+----------------------+--------+
+```
+
+11. Автоматизация создания ВМ `*`
+- Создан [create-reddit-vm.sh](./config-scripts/create-reddit-vm.sh)
+
+
 
 # **Полезное:**
 </details>
