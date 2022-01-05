@@ -985,5 +985,141 @@ terraform apply --auto-approve
 ## **Проверка сервиса по адресу: [http://62.84.127.170:9292/](http://62.84.127.170:9292/)**
 ---
 
+### Создание HTTP балансировщика `**`
+1. Создадим файл lb.tf со следующим содержимым:
+
+```terraform
+resource "yandex_lb_target_group" "reddit_lb_target_group" {
+  name      = "reddit-app-lb-group"
+  region_id = var.region_id
+
+  target {
+    subnet_id = var.subnet_id
+    address   = yandex_compute_instance.app.network_interface.0.ip_address
+  }
+}
+
+resource "yandex_lb_network_load_balancer" "load_balancer" {
+  name = "reddit-app-lb"
+
+  listener {
+    name = "reddit-app-listener"
+    port = 80
+    target_port = 9292
+    external_address_spec {
+      ip_version = "ipv4"
+    }
+  }
+
+  attached_target_group {
+    target_group_id = "${yandex_lb_target_group.reddit_lb_target_group.id}"
+
+    healthcheck {
+      name = "http"
+      http_options {
+        port = 9292
+        path = "/"
+      }
+    }
+  }
+}
+```
+
+2. Добавляем в outputs.tf переменные адреса балансировщика и проверяем работоспособность решения:
+
+```terraform
+output "loadbalancer_ip_address" {
+  value = yandex_lb_network_load_balancer.load_balancer.listener.*.external_address_spec[0].*.address
+}
+```
+
+3. Добавляем в код еще один terraform ресурс для нового инстанса приложения (reddit-app2):
+- main.tf
+
+```terraform
+resource "yandex_compute_instance" "app2" {
+  name = "reddit-app2"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+...
+  connection {
+    type  = "ssh"
+    host  = yandex_compute_instance.app2.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file("~/.ssh/appuser")
+  }
+```
+
+- lb.tf
+```terraform
+target {
+  address = yandex_compute_instance.app2.network_interface.0.ip_address
+  subnet_id = var.subnet_id
+}
+```
+
+- outputs.tf
+
+```terraform
+output "external_ip_address_app2" {
+  value = yandex_compute_instance.app2.network_interface.0.nat_ip_address
+}
+```
+
+## **Проблемы в данной конфигурации:**
+- Избыточный код
+- На инстансах нет единого бэкэнда в части БД (mongodb)
+
+3. Подход с заданием количества инстансов через параметр ресурса count:
+- Добавим  в variables.tf
+
+```terraform
+variable count_of_instances {
+  description = "Count of instances"
+  default     = 1
+}
+```
+- В main.tf удалим код для reddit-app2 и добавим:
+
+```terraform
+resource "yandex_compute_instance" "app" {
+  name  = "reddit-app-${count.index}"
+  count = var.count_of_instances
+  resources {
+    cores  = 2
+    memory = 2
+  }
+...
+connection {
+  type  = "ssh"
+  host  = self.network_interface.0.nat_ip_address
+  user  = "ubuntu"
+  agent = false
+  # путь до приватного ключа
+  private_key = file("~/.ssh/appuser")
+}
+```
+
+- В lb.tf внесем изменения для динамического определения target:
+
+```terraform
+dynamic "target" {
+  for_each = yandex_compute_instance.app.*.network_interface.0.ip_address
+  content {
+    subnet_id = var.subnet_id
+    address   = target.value
+  }
+}
+```
+
 # **Полезное:**
+- [Создать внутренний сетевой балансировщик](https://cloud.yandex.ru/docs/network-load-balancer/operations/internal-lb-create)
+- [yandex_lb_network_load_balancer](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_network_load_balancer)
+- [yandex_lb_target_group](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_target_group)
+- [dynamic Blocks](https://www.terraform.io/docs/language/expressions/dynamic-blocks.html)
+- [HashiCorp Terraform 0.12 Preview: For and For-Each](https://www.hashicorp.com/blog/hashicorp-terraform-0-12-preview-for-and-for-each)
 </details>
