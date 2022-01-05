@@ -918,8 +918,70 @@ Resource instance yandex_compute_instance.app has been marked as tainted.
 
 ```bash
 terraform plan
+➜  Deron-D_infra git:(terraform-1) ✗ terraform taint yandex_compute_instance.app
+Resource instance yandex_compute_instance.app has been marked as tainted.
+➜  Deron-D_infra git:(terraform-1) ✗ terraform apply --auto-approve
+yandex_compute_instance.app: Refreshing state... [id=fhm8qlanghmene5ijacb]
+...
+
+
+22. Проверяем результат изменений и работу приложения:
+
+```bash
+yandex_compute_instance.app: Creation complete after 2m33s [id=fhmsrsarg9tokee2dl8l]
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.12.59
 terraform apply --auto-approve
 ```
+
+23. Параметризируем конфигурационные файлы с помощью входных переменных:
+- Создадим для этих целей еще один конфигурационный файл [variables.tf](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/variables.tf)
+
+- Определим соответствующие параметры ресурсов main.tf через переменные:
+
+```terraform
+provider "yandex" {
+  service_account_key_file = var.service_account_key_file
+  cloud_id = var.cloud_id
+  folder_id = var.folder_id
+  zone = var.zone
+}
+```
+
+```terraform
+boot_disk {
+  initialize_params {
+    # Указать id образа созданного в предыдущем домашем задании
+    image_id = var.image_id
+  }
+}
+
+network_interface {
+  # Указан id подсети default-ru-central1-a
+  subnet_id = var.subnet_id
+  nat       = true
+}
+
+metadata = {
+ssh-keys = "ubuntu:${file(var.public_key_path)}"
+}
+```
+
+24. Определим переменные используя специальный файл [terraform.tfvars](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/terraform.tfvars.example)
+
+25. Форматирование и финальная проверка:
+
+```bash
+terraform fmt
+terraform destroy
+terraform plan
+terraform apply --auto-approve
+```
+
 
 # **Полезное:**
 </details>
