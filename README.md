@@ -971,7 +971,7 @@ ssh-keys = "ubuntu:${file(var.public_key_path)}"
 }
 ```
 
-24. Определим переменные используя специальный файл [terraform.tfvars](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/terraform.tfvars.example)
+24. Определим переменные, используя специальный файл [terraform.tfvars](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/terraform.tfvars.example)
 
 25. Форматирование и финальная проверка:
 
@@ -982,6 +982,8 @@ terraform plan
 terraform apply --auto-approve
 ```
 
+## **Проверка сервиса по адресу: [http://62.84.127.170:9292/](http://62.84.127.170:9292/)**
+---
 
 # **Полезное:**
 </details>
