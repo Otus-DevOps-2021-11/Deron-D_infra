@@ -573,6 +573,553 @@ packer build -var-file=./variables.json immutable.json
 - Создан [create-reddit-vm.sh](./config-scripts/create-reddit-vm.sh)
 
 
+# **Полезное:**
+</details>
+
+# **Лекция №8: Знакомство с Terraform**
+> _terraform-1_
+<details>
+ <summary>Знакомство с Terraform</summary>
+
+## **Задание:**
+Декларативное описание в виде кода инфраструктуры YC, требуемой для запуска тестового приложения, при помощи Terraform.
+
+Цель:
+В данном дз студент опишет всю инфраструктуру в Yandex Cloud при помощи Terraform.
+В данном задании тренируются навыки: создания и описания инфраструктуры при помощи Terraform. Принципы и подходы IaC.
+
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+1. Установлен terraform 0.12.8 с помощью [terraform-switcher](https://github.com/warrensbox/terraform-switcher)
+
+```bash
+curl -L https://raw.githubusercontent.com/warrensbox/terraform-switcher/release/install.sh | sudo bash
+
+➜  Deron-D_infra git:(terraform-1) ✗ tfswitch
+Use the arrow keys to navigate: ↓ ↑ → ←
+? Select Terraform version:
+  ▸ 0.12.8 *recent
+
+terraform git:(terraform-1) ✗ terraform -v
+Terraform v0.12.8
+```
+
+2. В корне репозитория дополнили файл [.gitignore](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/.gitignore) содержимым:
+
+```github
+*.tfstate
+*.tfstate.*.backup
+*.tfstate.backup
+*.tfvars
+.terraform/
+```
+
+3. Узнаем свои параметры токена, идентификатора облака и каталога:
+
+```bash
+yc config list
+➜  Deron-D_infra git:(terraform-1) ✗ yc config list
+token: <OAuth или статический ключ сервисного аккаунта>
+cloud-id: <идентификатор облака>
+folder-id: <идентификатор каталога>
+compute-default-zone: ru-central1-a
+```
+
+4. Создадим сервисный аккаунт для работы terraform:
+
+```bash
+FOLDER_ID=$(yc config list | grep folder-id | awk '{print $2}')
+SRV_ACC=trfuser
+
+yc iam service-account create --name $SRV_ACC --folder-id $FOLDER_ID
+
+SRV_ACC_ID=$(yc iam service-account get $SRV_ACC | grep ^id | awk '{print $2}')
+
+yc resource-manager folder add-access-binding --id $FOLDER_ID --role editor --service-account-id $SRV_ACC_ID
+
+yc iam key create --service-account-id $SRV_ACC_ID --output ~/.yc_keys/key.json
+```
+
+5. Смотрим информацию о имени, семействе и id пользовательских образов своего каталога с помощью команды yc compute image list:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) yc compute image list
++----------------------+------------------------+-------------+----------------------+--------+
+|          ID          |          NAME          |   FAMILY    |     PRODUCT IDS      | STATUS |
++----------------------+------------------------+-------------+----------------------+--------+
+| fd8190armqc6lvi7l8bq | reddit-base-1641220903 | reddit-base | f2ejt2v5v2gt4lfcs9gb | READY  |
++----------------------+------------------------+-------------+----------------------+--------+
+```
+
+6. Cмотрим информацию о имени и id сети; подсетей своего каталога с помощью команд yc vpc network list; yc vpc subnet list:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ yc vpc network list
++----------------------+--------+
+|          ID          |  NAME  |
++----------------------+--------+
+| enpf84mr5ho6p6299th2 | my-net |
++----------------------+--------+
+
+➜  Deron-D_infra git:(terraform-1) ✗ yc vpc subnet list
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+|          ID          |         NAME         |      NETWORK ID      | ROUTE TABLE ID |     ZONE      |      RANGE      |
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+| b0c5fukgbccn94q1o2ja | my-net-ru-central1-c | enpf84mr5ho6p6299th2 |                | ru-central1-c | [10.130.0.0/24] |
+| e2l35j160p54h8m8k41u | my-net-ru-central1-b | enpf84mr5ho6p6299th2 |                | ru-central1-b | [10.129.0.0/24] |
+| e9bogf7vjavut5hrqrjl | my-net-ru-central1-a | enpf84mr5ho6p6299th2 |                | ru-central1-a | [10.128.0.0/24] |
++----------------------+----------------------+----------------------+----------------+---------------+-----------------+
+```
+
+7. Правим main.tf до состояния:
+
+```terraform
+terraform {
+  required_version = "0.12.8"
+}
+
+provider "yandex" {
+  version                  = "0.35"
+  service_account_key_file = pathexpand("~/.yc_keys/key.json")
+  folder_id                = "b1gu87e4thvariradsue"
+  zone                     = "ru-central1-a"
+}
+
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      # Указать id образа созданного в предыдущем домашнем задании
+      image_id = "fd8190armqc6lvi7l8bq"
+    }
+  }
+  network_interface {
+    # Указан id подсети default-ru-central1-a
+    subnet_id = "e9bogf7vjavut5hrqrjl"
+    nat       = true
+  }
+}
+```
+
+8. Для того чтобы загрузить провайдер и начать его использовать выполняем следующую команду в
+директории terraform:
+
+```bash
+terraform init
+```
+
+9. Планируем изменения:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+
+------------------------------------------------------------------------
+
+An execution plan has been generated and is shown below.
+Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # yandex_compute_instance.app will be created
+  + resource "yandex_compute_instance" "app" {
+      + created_at                = (known after apply)
+      + folder_id                 = (known after apply)
+      + fqdn                      = (known after apply)
+      + hostname                  = (known after apply)
+      + id                        = (known after apply)
+      + name                      = "reddit-app"
+      + network_acceleration_type = "standard"
+      + platform_id               = "standard-v1"
+      + service_account_id        = (known after apply)
+      + status                    = (known after apply)
+      + zone                      = (known after apply)
+
+      + boot_disk {
+          + auto_delete = true
+          + device_name = (known after apply)
+          + disk_id     = (known after apply)
+          + mode        = (known after apply)
+
+          + initialize_params {
+              + description = (known after apply)
+              + image_id    = "fd8190armqc6lvi7l8bq"
+              + name        = (known after apply)
+              + size        = (known after apply)
+              + snapshot_id = (known after apply)
+              + type        = "network-hdd"
+            }
+        }
+
+      + network_interface {
+          + index          = (known after apply)
+          + ip_address     = (known after apply)
+          + ipv6           = (known after apply)
+          + ipv6_address   = (known after apply)
+          + mac_address    = (known after apply)
+          + nat            = true
+          + nat_ip_address = (known after apply)
+          + nat_ip_version = (known after apply)
+          + subnet_id      = "enpf84mr5ho6p6299th2"
+        }
+
+      + resources {
+          + core_fraction = 100
+          + cores         = 2
+          + memory        = 2
+        }
+
+      + scheduling_policy {
+          + preemptible = (known after apply)
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+```
+
+10. Создаем VM согласно описанию в манифесте main.tf:
+
+```bash
+➜  terraform git:(terraform-1) terraform apply -auto-approve
+yandex_compute_instance.app: Creating...
+yandex_compute_instance.app: Still creating... [10s elapsed]
+yandex_compute_instance.app: Still creating... [20s elapsed]
+yandex_compute_instance.app: Still creating... [30s elapsed]
+yandex_compute_instance.app: Still creating... [40s elapsed]
+yandex_compute_instance.app: Creation complete after 44s [id=fhmlc5re13c4l7j3pu5k]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+11. Смотрим внешний IP адрес созданного инстанса,
+```bash
+Deron-D_infra git:(terraform-1) ✗ terraform show | grep nat_ip_address
+        nat_ip_address = "62.84.119.129"
+```
+
+12. Пробуем подключиться по SSH:
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ ssh ubuntu@62.84.119.129
+The authenticity of host '62.84.119.129 (62.84.119.129)' can't be established.
+ECDSA key fingerprint is SHA256:EYLFosa66FgTBPXzrhuv1dMhZxZzDoISvtx1hWiGVks.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '62.84.119.129' (ECDSA) to the list of known hosts.
+ubuntu@62.84.119.129's password:
+
+```
+
+13. Нужно определить SSH публичный ключ пользователя ubuntu в метаданных нашего инстанса добавив в main.tf:
+```terraform
+metadata = {
+ssh-keys = "ubuntu:${file("~/.ssh/appuser.pub")}"
+}
+```
+
+14. Проверяем:
+
+```bash
+ssh ubuntu@62.84.119.129 -i ~/.ssh/appuser -o StrictHostKeyChecking=no
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ECDSA key sent by the remote host is
+SHA256:oSlrlVZN4mfxcXIho/FezIPb3xXjMKJwX5E+85+wawI.
+Please contact your system administrator.
+Add correct host key in /home/dpp/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /home/dpp/.ssh/known_hosts:11
+Password authentication is disabled to avoid man-in-the-middle attacks.
+Keyboard-interactive authentication is disabled to avoid man-in-the-middle attacks.
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+* Documentation:  https://help.ubuntu.com
+* Management:     https://landscape.canonical.com
+* Support:        https://ubuntu.com/advantage
+```
+
+15. Создадим файл outputs.tf для управления выходными переменными с содержимым:
+```terraform
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+```
+
+16. Проверяем работоспособность outputs.tf:
+
+```bash
+➜  Deron-D_infra git:(terraform-1) ✗ terraform refresh
+yandex_compute_instance.app: Refreshing state... [id=fhm08gs8ma628cvngi7m]
+
+Outputs:
+
+external_ip_address_app = 62.84.115.191
+```
+
+17. Добавляем provisioners в main.tf:
+
+```terraform
+provisioner "file" {
+  source = "files/puma.service"
+  destination = "/tmp/puma.service"
+}
+
+provisioner "remote-exec" {
+script = "files/deploy.sh"
+}
+```
+
+18. Создадим файл юнита для провижионинга [puma.service](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/files/puma.service)
+
+19. Добавляем секцию для определения паметров подключения привиженеров:
+
+```terraform
+connection {
+  type = "ssh"
+  host = yandex_compute_instance.app.network_interface.0.nat_ip_address
+  user = "ubuntu"
+  agent = false
+  # путь до приватного ключа
+  private_key = file("~/.ssh/appuser")
+  }
+```
+
+20. Проверяем работу провижинеров. Говорим terraform'y пересоздать ресурс VM при следующем
+применении изменений:
+
+```bash
+➜  terraform git:(terraform-1) ✗ terraform taint yandex_compute_instance.app
+Resource instance yandex_compute_instance.app has been marked as tainted.
+```
+
+21. Планируем и применяем изменения:
+
+```bash
+terraform plan
+➜  Deron-D_infra git:(terraform-1) ✗ terraform taint yandex_compute_instance.app
+Resource instance yandex_compute_instance.app has been marked as tainted.
+➜  Deron-D_infra git:(terraform-1) ✗ terraform apply --auto-approve
+yandex_compute_instance.app: Refreshing state... [id=fhm8qlanghmene5ijacb]
+...
+
+
+22. Проверяем результат изменений и работу приложения:
+
+```bash
+yandex_compute_instance.app: Creation complete after 2m33s [id=fhmsrsarg9tokee2dl8l]
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.12.59
+terraform apply --auto-approve
+```
+
+23. Параметризируем конфигурационные файлы с помощью входных переменных:
+- Создадим для этих целей еще один конфигурационный файл [variables.tf](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/variables.tf)
+
+- Определим соответствующие параметры ресурсов main.tf через переменные:
+
+```terraform
+provider "yandex" {
+  service_account_key_file = var.service_account_key_file
+  cloud_id = var.cloud_id
+  folder_id = var.folder_id
+  zone = var.zone
+}
+```
+
+```terraform
+boot_disk {
+  initialize_params {
+    # Указать id образа созданного в предыдущем домашем задании
+    image_id = var.image_id
+  }
+}
+
+network_interface {
+  # Указан id подсети default-ru-central1-a
+  subnet_id = var.subnet_id
+  nat       = true
+}
+
+metadata = {
+ssh-keys = "ubuntu:${file(var.public_key_path)}"
+}
+```
+
+24. Определим переменные, используя специальный файл [terraform.tfvars](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-1/terraform/terraform.tfvars.example)
+
+25. Форматирование и финальная проверка:
+
+```bash
+terraform fmt
+terraform destroy
+terraform plan
+terraform apply --auto-approve
+```
+
+## **Проверка сервиса по адресу: [http://62.84.127.170:9292/](http://62.84.127.170:9292/)**
+---
+
+### Создание HTTP балансировщика `**`
+1. Создадим файл lb.tf со следующим содержимым:
+
+```terraform
+resource "yandex_lb_target_group" "reddit_lb_target_group" {
+  name      = "reddit-app-lb-group"
+  region_id = var.region_id
+
+  target {
+    subnet_id = var.subnet_id
+    address   = yandex_compute_instance.app.network_interface.0.ip_address
+  }
+}
+
+resource "yandex_lb_network_load_balancer" "load_balancer" {
+  name = "reddit-app-lb"
+
+  listener {
+    name = "reddit-app-listener"
+    port = 80
+    target_port = 9292
+    external_address_spec {
+      ip_version = "ipv4"
+    }
+  }
+
+  attached_target_group {
+    target_group_id = "${yandex_lb_target_group.reddit_lb_target_group.id}"
+
+    healthcheck {
+      name = "http"
+      http_options {
+        port = 9292
+        path = "/"
+      }
+    }
+  }
+}
+```
+
+2. Добавляем в outputs.tf переменные адреса балансировщика и проверяем работоспособность решения:
+
+```terraform
+output "loadbalancer_ip_address" {
+  value = yandex_lb_network_load_balancer.load_balancer.listener.*.external_address_spec[0].*.address
+}
+```
+
+3. Добавляем в код еще один terraform ресурс для нового инстанса приложения (reddit-app2):
+- main.tf
+
+```terraform
+resource "yandex_compute_instance" "app2" {
+  name = "reddit-app2"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+...
+  connection {
+    type  = "ssh"
+    host  = yandex_compute_instance.app2.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file("~/.ssh/appuser")
+  }
+```
+
+- lb.tf
+```terraform
+target {
+  address = yandex_compute_instance.app2.network_interface.0.ip_address
+  subnet_id = var.subnet_id
+}
+```
+
+- outputs.tf
+
+```terraform
+output "external_ip_address_app2" {
+  value = yandex_compute_instance.app2.network_interface.0.nat_ip_address
+}
+```
+
+## **Проблемы в данной конфигурации:**
+- Избыточный код
+- На инстансах нет единого бэкэнда в части БД (mongodb)
+
+3. Подход с заданием количества инстансов через параметр ресурса count:
+- Добавим  в variables.tf
+
+```terraform
+variable count_of_instances {
+  description = "Count of instances"
+  default     = 1
+}
+```
+- В main.tf удалим код для reddit-app2 и добавим:
+
+```terraform
+resource "yandex_compute_instance" "app" {
+  name  = "reddit-app-${count.index}"
+  count = var.count_of_instances
+  resources {
+    cores  = 2
+    memory = 2
+  }
+...
+connection {
+  type  = "ssh"
+  host  = self.network_interface.0.nat_ip_address
+  user  = "ubuntu"
+  agent = false
+  # путь до приватного ключа
+  private_key = file("~/.ssh/appuser")
+}
+```
+
+- В lb.tf внесем изменения для динамического определения target:
+
+```terraform
+dynamic "target" {
+  for_each = yandex_compute_instance.app.*.network_interface.0.ip_address
+  content {
+    subnet_id = var.subnet_id
+    address   = target.value
+  }
+}
+```
 
 # **Полезное:**
+- [Создать внутренний сетевой балансировщик](https://cloud.yandex.ru/docs/network-load-balancer/operations/internal-lb-create)
+- [yandex_lb_network_load_balancer](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_network_load_balancer)
+- [yandex_lb_target_group](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_target_group)
+- [dynamic Blocks](https://www.terraform.io/docs/language/expressions/dynamic-blocks.html)
+- [HashiCorp Terraform 0.12 Preview: For and For-Each](https://www.hashicorp.com/blog/hashicorp-terraform-0-12-preview-for-and-for-each)
 </details>
