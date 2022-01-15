@@ -1198,6 +1198,12 @@ yandex_compute_instance.app[0]: Creating...
 В директории packer, где содержатся ваши шаблоны для билда VM, создадим два новых шаблона [db.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/db.json) и [app.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/app.json).
 
 В качестве базового шаблона используем уже имеющийся шаблон ubuntu16.json, корректирую только соответствующие секции с наименованиями образов и секциями провизионеров.
+~~~bash
+cd packer
+packer build -var-file=./variables.json ./db.json
+packer build -var-file=./variables.json ./app.json
+~~~
+
 
 5. Создадим две VM
 
@@ -1211,7 +1217,7 @@ resource "yandex_compute_instance" "app" {
     tags = "reddit-app"
   }
   resources {
-    cores  = 1
+    cores  = 2
     memory = 2
   }
 
@@ -1241,7 +1247,7 @@ resource "yandex_compute_instance" "db" {
   }
 
   resources {
-    cores  = 1
+    cores  = 2
     memory = 2
   }
 
@@ -1268,11 +1274,10 @@ resource "yandex_compute_instance" "db" {
 variable app_disk_image {
   description = "Disk image for reddit app"
   default = "reddit-app-base"
-
+}
 variable db_disk_image {
   description = "Disk image for reddit db"
   default = "reddit-db-base"
-  }
 }
 ~~~
 
@@ -1310,6 +1315,47 @@ output "external_ip_address_db" {
   value = yandex_compute_instance.db.network_interface.0.nat_ip_address
 }
 ~~~
+
+```bash
+t➜  terraform git:(terraform-2) ✗ terraform apply --auto-approve
+yandex_vpc_network.app-network: Refreshing state... [id=enpolo5jf02oabepguhn]
+yandex_vpc_subnet.app-subnet: Refreshing state... [id=e9bg6q0755m37i0q6994]
+yandex_compute_instance.app: Creating...
+yandex_compute_instance.db: Creating...
+yandex_compute_instance.app: Still creating... [10s elapsed]
+yandex_compute_instance.db: Still creating... [10s elapsed]
+yandex_compute_instance.app: Still creating... [20s elapsed]
+yandex_compute_instance.db: Still creating... [20s elapsed]
+yandex_compute_instance.db: Still creating... [30s elapsed]
+yandex_compute_instance.app: Still creating... [30s elapsed]
+yandex_compute_instance.db: Still creating... [40s elapsed]
+yandex_compute_instance.app: Still creating... [40s elapsed]
+yandex_compute_instance.db: Creation complete after 45s [id=fhmb2p80u23caniggojr]
+yandex_compute_instance.app: Still creating... [50s elapsed]
+yandex_compute_instance.app: Still creating... [1m0s elapsed]
+yandex_compute_instance.app: Creation complete after 1m3s [id=fhm3v1imfe15tibmvott]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = [
+  "51.250.9.58",
+]
+external_ip_address_db = 62.84.115.41
+```
+Проверим доступность по SSH:
+~~~bash
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@51.250.9.58 -i ~/.ssh/appuser
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.115.41 -i ~/.ssh/appuser
+~~~
+
+Удалим созданные ресурсы, используя terraform destroy
+~~~bash
+terraform destroy --auto-approve
+~~~
+
+
 
 # **Полезное:**
 
