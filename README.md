@@ -895,7 +895,7 @@ script = "files/deploy.sh"
 
 19. Добавляем секцию для определения паметров подключения привиженеров:
 
-```terraform
+```hcl
 connection {
   type = "ssh"
   host = yandex_compute_instance.app.network_interface.0.nat_ip_address
@@ -922,7 +922,7 @@ terraform plan
 Resource instance yandex_compute_instance.app has been marked as tainted.
 ➜  Deron-D_infra git:(terraform-1) ✗ terraform apply --auto-approve
 yandex_compute_instance.app: Refreshing state... [id=fhm8qlanghmene5ijacb]
-...
+```
 
 
 22. Проверяем результат изменений и работу приложения:
@@ -1122,4 +1122,195 @@ dynamic "target" {
 - [yandex_lb_target_group](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_target_group)
 - [dynamic Blocks](https://www.terraform.io/docs/language/expressions/dynamic-blocks.html)
 - [HashiCorp Terraform 0.12 Preview: For and For-Each](https://www.hashicorp.com/blog/hashicorp-terraform-0-12-preview-for-and-for-each)
+
+</details>
+
+
+
+# **Лекция №9: Принципы организации инфраструктурного кода и работа над инфраструктурой в команде на примере Terraform**
+> _terraform-2_
+<details>
+ <summary>Работа с Terraform в команде</summary>
+
+## **Задание:**
+Создание Terraform модулей для управления компонентами инфраструктуры.
+
+Цель:
+В данном дз студент продолжит работать с Terraform. Опишет и произведет настройку нескольких окружений при помощи Terraform. Настроит remote backend.
+В данном задании тренируются навыки: работы с Terraform, использования внешних хранилищ состояния инфраструктуры.
+
+Описание и настройка инфраструктуры нескольких окружений. Работа с Terraform remote backend.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+1. Создаем новую ветку в инфраструктурном репозитории и подчищаем результаты заданий со ⭐:
+
+```bash
+git checkout -b terraform-2
+git mv terraform/lb.tf terraform/files/
+```
+
+2. Зададим IP для инстанса с приложением в виде внешнего ресурса, добавив в `main.tf`:
+
+```hcl
+resource "yandex_vpc_network" "app-network" {
+  name = "reddit-app-network"
+}
+resource "yandex_vpc_subnet" "app-subnet" {
+  name           = "reddit-app-subnet"
+  zone           = "ru-central1-a"
+  network_id     = "${yandex_vpc_network.app-network.id}"
+  v4_cidr_blocks = ["192.168.10.0/24"]
+}
+```
+
+- также добавим в 'main.tf' ссылку на внешний ресурс:
+
+```hcl
+network_interface {
+  subnet_id = yandex_vpc_subnet.app-subnet.id
+  nat = true
+}
+```
+
+3. Применим изменения
+```bash
+➜  terraform git:(terraform-2) ✗ terraform destroy
+➜  terraform git:(terraform-2) ✗ terraform apply --auto-approve
+yandex_vpc_network.app-network: Creating...
+yandex_vpc_network.app-network: Creation complete after 1s [id=enpg13juslvurvb9ubr9]
+yandex_vpc_subnet.app-subnet: Creating...
+yandex_vpc_subnet.app-subnet: Creation complete after 1s [id=e9be27mnk49np70ijone]
+yandex_compute_instance.app[0]: Creating...
+```
+
+Видим, что ресурс VM начал создаваться только после
+завершения создания yandex_vpc_subnet в результате неявной зависимости этих ресурсов.
+
+4. Создание раздельных образов для инстансов app и db с помощью Packer:
+
+В директории packer, где содержатся ваши шаблоны для билда VM, создадим два новых шаблона [db.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/db.json) и [app.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/app.json).
+
+В качестве базового шаблона используем уже имеющийся шаблон ubuntu16.json, корректирую только соответствующие секции с наименованиями образов и секциями провизионеров.
+
+5. Создадим две VM
+
+Разобьем конфиг `main.tf` на несколько конфигов
+Создадим файл `app.tf`, куда вынесем конфигурацию для VM с приложением:
+~~~hcl
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+
+  labels = {
+    tags = "reddit-app"
+  }
+  resources {
+    cores  = 1
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.app_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = yandex_vpc_subnet.app-subnet.id
+    nat = true
+  }
+
+  metadata = {
+  ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+}
+~~~
+
+И создадим файл `db.tf`, куда вынесем конфигурацию для VM с приложением:
+~~~hcl
+resource "yandex_compute_instance" "db" {
+  name = "reddit-db"
+  labels = {
+    tags = "reddit-db"
+  }
+
+  resources {
+    cores  = 1
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.db_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = yandex_vpc_subnet.app-subnet.id
+    nat = true
+  }
+
+  metadata = {
+  ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+}
+~~~
+
+Не забудем объявить соответствующие переменные для образов приложения и базы данных в `variables.tf`:
+
+~~~hcl
+variable app_disk_image {
+  description = "Disk image for reddit app"
+  default = "reddit-app-base"
+
+variable db_disk_image {
+  description = "Disk image for reddit db"
+  default = "reddit-db-base"
+  }
+}
+~~~
+
+Создадим файл `vpc.tf`, в который вынесем конфигурацию сети и подсети, которое применимо для всех инстансов нашей сети.
+~~~hcl
+resource "yandex_vpc_network" "app-network" {
+  name = "app-network"
+}
+
+resource "yandex_vpc_subnet" "app-subnet" {
+  name           = "app-subnet"
+  zone           = "ru-central1-a"
+  network_id     = "${yandex_vpc_network.app-network.id}"
+  v4_cidr_blocks = ["192.168.10.0/24"]
+}
+~~~
+
+В итоге, в файле `main.tf` должно остаться только определение провайдера:
+~~~hcl
+provider "yandex" {
+  version                  = 0.35
+  service_account_key_file = var.service_account_key_file
+  cloud_id                 = var.cloud_id
+  folder_id                = var.folder_id
+  zone                     = var.zone
+}
+~~~
+
+Не забудем добавить nat адреса инстансов в `outputs.tf` переменные:
+~~~hcl
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+output "external_ip_address_db" {
+  value = yandex_compute_instance.db.network_interface.0.nat_ip_address
+}
+~~~
+
+# **Полезное:**
+
 </details>
