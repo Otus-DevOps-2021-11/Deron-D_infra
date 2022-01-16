@@ -1355,6 +1355,255 @@ external_ip_address_db = 62.84.115.41
 terraform destroy --auto-approve
 ~~~
 
+6. Создание модулей
+
+Внутри директории terraform создадим директорию modules, в которой мы будем определять модули.
+
+Внутри директории modules создадим директорию db со следующими файлами:
+`main.tf`
+~~~hcl
+resource "yandex_compute_instance" "db" {
+  name = "reddit-db"
+  labels = {
+    tags = "reddit-db"
+  }
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      # Указать id образа созданного в предыдущем домашем задании
+      image_id = var.db_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = var.subnet_id
+    nat       = true
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+
+  connection {
+    type  = "ssh"
+    host  = self.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file(var.private_key_path)
+  }
+
+  scheduling_policy {
+    preemptible = true
+  }
+}
+~~~
+
+`variables.tf`
+~~~hcl
+variable public_key_path {
+  description = "Path to the public key used for ssh access"
+}
+variable db_disk_image {
+  description = "Disk image for reddit db"
+  default     = "reddit-db-base"
+}
+variable subnet_id {
+  description = "Subnets for modules"
+}
+variable private_key_path {
+  description = "path to private key"
+}
+~~~
+
+`outputs.tf`
+~~~hcl
+output "external_ip_address_db" {
+  value = yandex_compute_instance.db.network_interface.0.nat_ip_address
+}
+~~~
+
+Создадим по аналогии для модуля приложения директорию `modules\app` с содержимым
+`main.tf`
+~~~hcl
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+  labels = {
+    tags = "reddit-app"
+  }
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.app_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = var.subnet_id
+    nat       = true
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+
+  connection {
+    type  = "ssh"
+    host  = self.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file(var.private_key_path)
+  }
+
+  scheduling_policy {
+    preemptible = true
+  }
+
+  provisioner "file" {
+    source      = "files/puma.service"
+    destination = "/tmp/puma.service"
+  }
+
+  provisioner "remote-exec" {
+    script = "files/deploy.sh"
+  }
+}
+~~~
+
+`variables.tf`
+~~~hcl
+variable public_key_path {
+  description = "Path to the public key used for ssh access"
+}
+variable app_disk_image {
+  description = "Disk image for reddit app"
+  default     = "reddit-app-base"
+}
+variable subnet_id {
+  description = "Subnets for modules"
+}
+variable private_key_path {
+  description = "path to private key"
+}
+~~~
+
+`outputs.tf`
+~~~hcl
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+~~~
+
+
+В файл `main.tf`, где у нас определен провайдер вставим секции вызова созданных нами модулей
+~~~hcl
+provider "yandex" {
+  version                  = "0.35"
+  service_account_key_file = var.service_account_key_file
+  cloud_id                 = var.cloud_id
+  folder_id                = var.folder_id
+  zone                     = var.zone
+}
+
+data "yandex_compute_image" "app_image" {
+  name = var.app_disk_image
+}
+
+data "yandex_compute_image" "db_image" {
+  name = var.db_disk_image
+}
+
+module "app" {
+  source          = "./modules/app"
+  public_key_path = var.public_key_path
+  private_key_path = var.private_key_path
+  app_disk_image  = "${data.yandex_compute_image.app_image.id}"
+  subnet_id       = var.subnet_id
+}
+module "db" {
+  source          = "./modules/db"
+  public_key_path = var.public_key_path
+  private_key_path = var.private_key_path
+  db_disk_image   = "${data.yandex_compute_image.db_image.id}"
+  subnet_id       = var.subnet_id
+}
+~~~
+
+Из папки terraform удаляем уже ненужные файлы app.tf, db.tf, vpc.tf и изменяем `outputs.tf`:
+~~~hcl
+output "external_ip_address_app" {
+  value = module.app.external_ip_address_app
+}
+output "external_ip_address_db" {
+  value = module.db.external_ip_address_db
+}
+~~~
+
+Для использования модулей нужно сначала их загрузить из указанного источника `source`:
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform get
+- app in modules/app
+- db in modules/db
+~~~
+
+Планируем изменения:
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+...
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+~~~
+
+После применения конфигурации с помощью terraform apply в соответствии с нашей конфигурацией проверяем SSH доступ ко обоим инстансам
+Проверим доступность по SSH:
+~~~bash
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.118.253 -i ~/.ssh/appuser
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.126.94 -i ~/.ssh/appuser
+~~~
+
+7. Переиспользование модулей
+В директории terrafrom создадим две директории: stage и prod. Скопируем  файлы main.tf, variables.tf, outputs.tf, terraform.tfvars из директории terraform в каждую из созданных директорий.
+
+Поменяем пути к модулям в main.tf на ../modules/xxx вместо ./modules/xxx в папках stage и prod.
+
+Проверим правильность настроек инфраструктуры каждого окружения:
+~~~bash
+cd stage
+terraform init
+terraform plan
+terraform apply --auto-approve
+terraform destroy --auto-approve
+
+cd ../prod
+terraform init
+terraform plan
+terraform apply --auto-approve
+terraform destroy --auto-approve
+~~~
+
+Отформатируем конфигурационные файлы, используя команду ` terraform fmt -recursive`
 
 
 # **Полезное:**
