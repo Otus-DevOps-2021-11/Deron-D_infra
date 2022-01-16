@@ -1,6 +1,3 @@
-# terraform {
-#   required_version = "0.12.8"
-# }
 provider "yandex" {
   version                  = "0.35"
   service_account_key_file = var.service_account_key_file
@@ -8,6 +5,7 @@ provider "yandex" {
   folder_id                = var.folder_id
   zone                     = var.zone
 }
+
 data "yandex_compute_image" "app_image" {
   name = var.app_disk_image
 }
@@ -22,6 +20,8 @@ module "app" {
   private_key_path = var.private_key_path
   app_disk_image   = "${data.yandex_compute_image.app_image.id}"
   subnet_id        = var.subnet_id
+  db_ipaddr        = module.db.internal_ip_address_db
+  enable_provision = var.enable_provision
 }
 module "db" {
   source           = "../modules/db"
@@ -29,4 +29,5 @@ module "db" {
   private_key_path = var.private_key_path
   db_disk_image    = "${data.yandex_compute_image.db_image.id}"
   subnet_id        = var.subnet_id
+  enable_provision = var.enable_provision
 }

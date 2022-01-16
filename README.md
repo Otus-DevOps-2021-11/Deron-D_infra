@@ -1606,6 +1606,230 @@ terraform destroy --auto-approve
 Отформатируем конфигурационные файлы, используя команду ` terraform fmt -recursive`
 
 
+8. Настройка хранения стейт файла в удаленном бекенде. Задание со ⭐
+
+~~~bash
+➜  terraform git:(terraform-2) yc iam service-account list
++----------------------+---------+
+|          ID          |  NAME   |
++----------------------+---------+
+| aje0m03rhn6s1lq4un9a | svcuser |
+| aje6upad8qvh1nri7dld | appuser |
+| ajefutq36ihgrbitvbcc | tfuser  |
++----------------------+---------+
+
+➜  terraform git:(terraform-2) yc iam access-key create --service-account-name tfuser
+access_key:
+  id: aje1q3g7cs038pcm84sr
+  service_account_id: ajefutq36ihgrbitvbcc
+  created_at: "2022-01-16T18:21:32.264929004Z"
+  key_id: access-key
+secret: secret-key
+~~~
+
+Соответственно заносим полученные данные в `variables.tf` и `terraform.tvars`
+
+Планируем и вносим изменения в инфраструктуру:
+
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+
+------------------------------------------------------------------------
+
+An execution plan has been generated and is shown below.
+Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # yandex_storage_bucket.otus-storage-bucket will be created
+  + resource "yandex_storage_bucket" "otus-storage-bucket" {
+      + access_key         = "access-key"
+      + acl                = "private"
+      + bucket             = "deron-d"
+      + bucket_domain_name = (known after apply)
+      + force_destroy      = true
+      + id                 = (known after apply)
+      + secret_key         = (sensitive value)
+      + website_domain     = (known after apply)
+      + website_endpoint   = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+...
+
+~~~hcl
+terraform {
+  backend "s3" {
+    endpoint   = "storage.yandexcloud.net"
+    bucket     = "deron-d"
+    region     = "ru-central1-a"
+    key        = "terraform.tfstate"
+    # access_key = var.access_key
+    # secret_key = var.secret_key
+    access_key = "access-key"
+    secret_key = "secret-key"
+
+    skip_region_validation      = true
+    skip_credentials_validation = true
+   }
+}
+~~~
+
+Проверяем сохранение state VM's для каждого из окружений в bucket 'otus-bucket'
+~~~bash
+➜  stage pwd
+/home/dpp/test/terraform/stage
+➜  stage ll
+итого 24K
+-rw-r--r--. 1 dpp dpp  447 янв 16 23:07 backend.tf
+-rw-r--r--. 1 dpp dpp  906 янв 16 19:30 main.tf
+-rw-r--r--. 1 dpp dpp  161 янв 16 19:28 outputs.tf
+-rw-r--r--. 1 dpp dpp  703 янв 16 22:14 terraform.tfvars
+-rw-r--r--. 1 dpp dpp  358 янв 16 20:26 terraform.tfvars.example
+-rw-r--r--. 1 dpp dpp 1,2K янв 16 21:28 variables.tf
+➜  stage terraform init
+Initializing modules...
+- app in ../modules/app
+- db in ../modules/db
+
+Initializing the backend...
+
+Successfully configured the backend "s3"! Terraform will automatically
+use this backend unless the backend configuration changes.
+
+Initializing provider plugins...
+- Checking for available provider plugins...
+- Downloading plugin for provider "yandex" (terraform-providers/yandex) 0.35.0...
+
+
+Warning: registry.terraform.io: This version of Terraform has an outdated GPG key and is unable to verify new provider releases. Please upgrade Terraform to at least 0.12.31 to receive new provider updates. For details see: https://discuss.hashicorp.com/t/hcsec-2021-12-codecov-security-event-and-hashicorp-gpg-key-exposure/23512
+
+
+
+Warning: registry.terraform.io: For users on Terraform 0.13 or greater, this provider has moved to yandex-cloud/yandex. Please update your source in required_providers.
+
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+➜  stage terraform apply -auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+...
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.206
+external_ip_address_db = 51.250.10.72
+➜  stage cd ../prod
+➜  prod terraform init
+Initializing modules...
+- app in ../modules/app
+- db in ../modules/db
+
+Initializing the backend...
+
+Successfully configured the backend "s3"! Terraform will automatically
+use this backend unless the backend configuration changes.
+
+Initializing provider plugins...
+- Checking for available provider plugins...
+- Downloading plugin for provider "yandex" (terraform-providers/yandex) 0.35.0...
+
+
+Warning: registry.terraform.io: This version of Terraform has an outdated GPG key and is unable to verify new provider releases. Please upgrade Terraform to at least 0.12.31 to receive new provider updates. For details see: https://discuss.hashicorp.com/t/hcsec-2021-12-codecov-security-event-and-hashicorp-gpg-key-exposure/23512
+
+
+
+Warning: registry.terraform.io: For users on Terraform 0.13 or greater, this provider has moved to yandex-cloud/yandex. Please update your source in required_providers.
+
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+➜  prod terraform apply -auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhma4s7c99lhip6t2k0q]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmh21hft03ojnhhkrgk]
+
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.206
+external_ip_address_db = 51.250.10.72
+~~~
+
+9. Настройка provisioner. Задание со ⭐⭐
+
+Добавим переменную на включения/отключения provisioner в `variables.tf` окружений stage|prod:
+~~~hcl
+variable enable_provision {
+  description = "Enable provision"
+  default = true
+}
+~~~
+
+Добавляем в 'main.tf' для модулей app и db соответственно следующий код перед секцией connection:
+~~~hcl
+resource "null_resource" "app" {
+  count = var.enable_provision ? 1 : 0
+  triggers = {
+    cluster_instance_ids = yandex_compute_instance.app.id
+  }
+
+...
+resource "null_resource" "db" {
+  count = var.enable_provision ? 1 : 0
+  triggers = {
+    cluster_instance_ids = yandex_compute_instance.db.id
+  }
+~~~
+
+Добавляем передачу значений переменной enable_provision в секции вызова модуля 'main.tf'
+~~~hcl
+module "db|app" {
+  ...
+  enable_provision = var.enable_provision
+  ...
+~~~
+
 # **Полезное:**
+
+- [Публичный от HashiCorp реестр модулей для terraform](https://registry.terraform.io/)
+- [Загрузка состояний Terraform в Object Storage](https://cloud.yandex.ru/docs/solutions/infrastructure-management/terraform-state-storage)
+- [yandex_storage_bucket](https://registry.terraform.io/providers/yandex-cloud/yandex/latest/docs/resources/storage_bucket)
+</details>
+- [Provisioners Without a Resource](https://www.terraform.io/docs/language/resources/provisioners/null_resource.html)
+
+
 
 </details>
