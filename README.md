@@ -895,7 +895,7 @@ script = "files/deploy.sh"
 
 19. Добавляем секцию для определения паметров подключения привиженеров:
 
-```terraform
+```hcl
 connection {
   type = "ssh"
   host = yandex_compute_instance.app.network_interface.0.nat_ip_address
@@ -922,7 +922,7 @@ terraform plan
 Resource instance yandex_compute_instance.app has been marked as tainted.
 ➜  Deron-D_infra git:(terraform-1) ✗ terraform apply --auto-approve
 yandex_compute_instance.app: Refreshing state... [id=fhm8qlanghmene5ijacb]
-...
+```
 
 
 22. Проверяем результат изменений и работу приложения:
@@ -1122,4 +1122,711 @@ dynamic "target" {
 - [yandex_lb_target_group](https://registry.terraform.io/providers/yandex-cloud/yandex/0.44.0/docs/resources/lb_target_group)
 - [dynamic Blocks](https://www.terraform.io/docs/language/expressions/dynamic-blocks.html)
 - [HashiCorp Terraform 0.12 Preview: For and For-Each](https://www.hashicorp.com/blog/hashicorp-terraform-0-12-preview-for-and-for-each)
+
+</details>
+
+
+
+# **Лекция №9: Принципы организации инфраструктурного кода и работа над инфраструктурой в команде на примере Terraform**
+> _terraform-2_
+<details>
+ <summary>Работа с Terraform в команде</summary>
+
+## **Задание:**
+Создание Terraform модулей для управления компонентами инфраструктуры.
+
+Цель:
+В данном дз студент продолжит работать с Terraform. Опишет и произведет настройку нескольких окружений при помощи Terraform. Настроит remote backend.
+В данном задании тренируются навыки: работы с Terraform, использования внешних хранилищ состояния инфраструктуры.
+
+Описание и настройка инфраструктуры нескольких окружений. Работа с Terraform remote backend.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+1. Создаем новую ветку в инфраструктурном репозитории и подчищаем результаты заданий со ⭐:
+
+```bash
+git checkout -b terraform-2
+git mv terraform/lb.tf terraform/files/
+```
+
+2. Зададим IP для инстанса с приложением в виде внешнего ресурса, добавив в `main.tf`:
+
+```hcl
+resource "yandex_vpc_network" "app-network" {
+  name = "reddit-app-network"
+}
+resource "yandex_vpc_subnet" "app-subnet" {
+  name           = "reddit-app-subnet"
+  zone           = "ru-central1-a"
+  network_id     = "${yandex_vpc_network.app-network.id}"
+  v4_cidr_blocks = ["192.168.10.0/24"]
+}
+```
+
+- также добавим в 'main.tf' ссылку на внешний ресурс:
+
+```hcl
+network_interface {
+  subnet_id = yandex_vpc_subnet.app-subnet.id
+  nat = true
+}
+```
+
+3. Применим изменения
+```bash
+➜  terraform git:(terraform-2) ✗ terraform destroy
+➜  terraform git:(terraform-2) ✗ terraform apply --auto-approve
+yandex_vpc_network.app-network: Creating...
+yandex_vpc_network.app-network: Creation complete after 1s [id=enpg13juslvurvb9ubr9]
+yandex_vpc_subnet.app-subnet: Creating...
+yandex_vpc_subnet.app-subnet: Creation complete after 1s [id=e9be27mnk49np70ijone]
+yandex_compute_instance.app[0]: Creating...
+```
+
+Видим, что ресурс VM начал создаваться только после
+завершения создания yandex_vpc_subnet в результате неявной зависимости этих ресурсов.
+
+4. Создание раздельных образов для инстансов app и db с помощью Packer:
+
+В директории packer, где содержатся ваши шаблоны для билда VM, создадим два новых шаблона [db.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/db.json) и [app.json](https://github.com/Otus-DevOps-2021-11/Deron-D_infra/blob/terraform-2/packer/app.json).
+
+В качестве базового шаблона используем уже имеющийся шаблон ubuntu16.json, корректирую только соответствующие секции с наименованиями образов и секциями провизионеров.
+~~~bash
+cd packer
+packer build -var-file=./variables.json ./db.json
+packer build -var-file=./variables.json ./app.json
+~~~
+
+
+5. Создадим две VM
+
+Разобьем конфиг `main.tf` на несколько конфигов
+Создадим файл `app.tf`, куда вынесем конфигурацию для VM с приложением:
+~~~hcl
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+
+  labels = {
+    tags = "reddit-app"
+  }
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.app_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = yandex_vpc_subnet.app-subnet.id
+    nat = true
+  }
+
+  metadata = {
+  ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+}
+~~~
+
+И создадим файл `db.tf`, куда вынесем конфигурацию для VM с приложением:
+~~~hcl
+resource "yandex_compute_instance" "db" {
+  name = "reddit-db"
+  labels = {
+    tags = "reddit-db"
+  }
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.db_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = yandex_vpc_subnet.app-subnet.id
+    nat = true
+  }
+
+  metadata = {
+  ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+}
+~~~
+
+Не забудем объявить соответствующие переменные для образов приложения и базы данных в `variables.tf`:
+
+~~~hcl
+variable app_disk_image {
+  description = "Disk image for reddit app"
+  default = "reddit-app-base"
+}
+variable db_disk_image {
+  description = "Disk image for reddit db"
+  default = "reddit-db-base"
+}
+~~~
+
+Создадим файл `vpc.tf`, в который вынесем конфигурацию сети и подсети, которое применимо для всех инстансов нашей сети.
+~~~hcl
+resource "yandex_vpc_network" "app-network" {
+  name = "app-network"
+}
+
+resource "yandex_vpc_subnet" "app-subnet" {
+  name           = "app-subnet"
+  zone           = "ru-central1-a"
+  network_id     = "${yandex_vpc_network.app-network.id}"
+  v4_cidr_blocks = ["192.168.10.0/24"]
+}
+~~~
+
+В итоге, в файле `main.tf` должно остаться только определение провайдера:
+~~~hcl
+provider "yandex" {
+  version                  = 0.35
+  service_account_key_file = var.service_account_key_file
+  cloud_id                 = var.cloud_id
+  folder_id                = var.folder_id
+  zone                     = var.zone
+}
+~~~
+
+Не забудем добавить nat адреса инстансов в `outputs.tf` переменные:
+~~~hcl
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+output "external_ip_address_db" {
+  value = yandex_compute_instance.db.network_interface.0.nat_ip_address
+}
+~~~
+
+```bash
+t➜  terraform git:(terraform-2) ✗ terraform apply --auto-approve
+yandex_vpc_network.app-network: Refreshing state... [id=enpolo5jf02oabepguhn]
+yandex_vpc_subnet.app-subnet: Refreshing state... [id=e9bg6q0755m37i0q6994]
+yandex_compute_instance.app: Creating...
+yandex_compute_instance.db: Creating...
+yandex_compute_instance.app: Still creating... [10s elapsed]
+yandex_compute_instance.db: Still creating... [10s elapsed]
+yandex_compute_instance.app: Still creating... [20s elapsed]
+yandex_compute_instance.db: Still creating... [20s elapsed]
+yandex_compute_instance.db: Still creating... [30s elapsed]
+yandex_compute_instance.app: Still creating... [30s elapsed]
+yandex_compute_instance.db: Still creating... [40s elapsed]
+yandex_compute_instance.app: Still creating... [40s elapsed]
+yandex_compute_instance.db: Creation complete after 45s [id=fhmb2p80u23caniggojr]
+yandex_compute_instance.app: Still creating... [50s elapsed]
+yandex_compute_instance.app: Still creating... [1m0s elapsed]
+yandex_compute_instance.app: Creation complete after 1m3s [id=fhm3v1imfe15tibmvott]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = [
+  "51.250.9.58",
+]
+external_ip_address_db = 62.84.115.41
+```
+Проверим доступность по SSH:
+~~~bash
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@51.250.9.58 -i ~/.ssh/appuser
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.115.41 -i ~/.ssh/appuser
+~~~
+
+Удалим созданные ресурсы, используя terraform destroy
+~~~bash
+terraform destroy --auto-approve
+~~~
+
+6. Создание модулей
+
+Внутри директории terraform создадим директорию modules, в которой мы будем определять модули.
+
+Внутри директории modules создадим директорию db со следующими файлами:
+`main.tf`
+~~~hcl
+resource "yandex_compute_instance" "db" {
+  name = "reddit-db"
+  labels = {
+    tags = "reddit-db"
+  }
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      # Указать id образа созданного в предыдущем домашем задании
+      image_id = var.db_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = var.subnet_id
+    nat       = true
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+
+  connection {
+    type  = "ssh"
+    host  = self.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file(var.private_key_path)
+  }
+
+  scheduling_policy {
+    preemptible = true
+  }
+}
+~~~
+
+`variables.tf`
+~~~hcl
+variable public_key_path {
+  description = "Path to the public key used for ssh access"
+}
+variable db_disk_image {
+  description = "Disk image for reddit db"
+  default     = "reddit-db-base"
+}
+variable subnet_id {
+  description = "Subnets for modules"
+}
+variable private_key_path {
+  description = "path to private key"
+}
+~~~
+
+`outputs.tf`
+~~~hcl
+output "external_ip_address_db" {
+  value = yandex_compute_instance.db.network_interface.0.nat_ip_address
+}
+~~~
+
+Создадим по аналогии для модуля приложения директорию `modules\app` с содержимым
+`main.tf`
+~~~hcl
+resource "yandex_compute_instance" "app" {
+  name = "reddit-app"
+  labels = {
+    tags = "reddit-app"
+  }
+
+  resources {
+    cores  = 2
+    memory = 2
+  }
+
+  boot_disk {
+    initialize_params {
+      image_id = var.app_disk_image
+    }
+  }
+
+  network_interface {
+    subnet_id = var.subnet_id
+    nat       = true
+  }
+
+  metadata = {
+    ssh-keys = "ubuntu:${file(var.public_key_path)}"
+  }
+
+  connection {
+    type  = "ssh"
+    host  = self.network_interface.0.nat_ip_address
+    user  = "ubuntu"
+    agent = false
+    # путь до приватного ключа
+    private_key = file(var.private_key_path)
+  }
+
+  scheduling_policy {
+    preemptible = true
+  }
+
+  provisioner "file" {
+    source      = "files/puma.service"
+    destination = "/tmp/puma.service"
+  }
+
+  provisioner "remote-exec" {
+    script = "files/deploy.sh"
+  }
+}
+~~~
+
+`variables.tf`
+~~~hcl
+variable public_key_path {
+  description = "Path to the public key used for ssh access"
+}
+variable app_disk_image {
+  description = "Disk image for reddit app"
+  default     = "reddit-app-base"
+}
+variable subnet_id {
+  description = "Subnets for modules"
+}
+variable private_key_path {
+  description = "path to private key"
+}
+~~~
+
+`outputs.tf`
+~~~hcl
+output "external_ip_address_app" {
+  value = yandex_compute_instance.app.network_interface.0.nat_ip_address
+}
+~~~
+
+
+В файл `main.tf`, где у нас определен провайдер вставим секции вызова созданных нами модулей
+~~~hcl
+provider "yandex" {
+  version                  = "0.35"
+  service_account_key_file = var.service_account_key_file
+  cloud_id                 = var.cloud_id
+  folder_id                = var.folder_id
+  zone                     = var.zone
+}
+
+data "yandex_compute_image" "app_image" {
+  name = var.app_disk_image
+}
+
+data "yandex_compute_image" "db_image" {
+  name = var.db_disk_image
+}
+
+module "app" {
+  source          = "./modules/app"
+  public_key_path = var.public_key_path
+  private_key_path = var.private_key_path
+  app_disk_image  = "${data.yandex_compute_image.app_image.id}"
+  subnet_id       = var.subnet_id
+}
+module "db" {
+  source          = "./modules/db"
+  public_key_path = var.public_key_path
+  private_key_path = var.private_key_path
+  db_disk_image   = "${data.yandex_compute_image.db_image.id}"
+  subnet_id       = var.subnet_id
+}
+~~~
+
+Из папки terraform удаляем уже ненужные файлы app.tf, db.tf, vpc.tf и изменяем `outputs.tf`:
+~~~hcl
+output "external_ip_address_app" {
+  value = module.app.external_ip_address_app
+}
+output "external_ip_address_db" {
+  value = module.db.external_ip_address_db
+}
+~~~
+
+Для использования модулей нужно сначала их загрузить из указанного источника `source`:
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform get
+- app in modules/app
+- db in modules/db
+~~~
+
+Планируем изменения:
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+...
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+~~~
+
+После применения конфигурации с помощью terraform apply в соответствии с нашей конфигурацией проверяем SSH доступ ко обоим инстансам
+Проверим доступность по SSH:
+~~~bash
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.118.253 -i ~/.ssh/appuser
+➜  terraform git:(terraform-2) ✗ ssh ubuntu@62.84.126.94 -i ~/.ssh/appuser
+~~~
+
+7. Переиспользование модулей
+В директории terrafrom создадим две директории: stage и prod. Скопируем  файлы main.tf, variables.tf, outputs.tf, terraform.tfvars из директории terraform в каждую из созданных директорий.
+
+Поменяем пути к модулям в main.tf на ../modules/xxx вместо ./modules/xxx в папках stage и prod.
+
+Проверим правильность настроек инфраструктуры каждого окружения:
+~~~bash
+cd stage
+terraform init
+terraform plan
+terraform apply --auto-approve
+terraform destroy --auto-approve
+
+cd ../prod
+terraform init
+terraform plan
+terraform apply --auto-approve
+terraform destroy --auto-approve
+~~~
+
+Отформатируем конфигурационные файлы, используя команду ` terraform fmt -recursive`
+
+
+8. Настройка хранения стейт файла в удаленном бекенде. Задание со ⭐
+
+~~~bash
+➜  terraform git:(terraform-2) yc iam service-account list
++----------------------+---------+
+|          ID          |  NAME   |
++----------------------+---------+
+| aje0m03rhn6s1lq4un9a | svcuser |
+| aje6upad8qvh1nri7dld | appuser |
+| ajefutq36ihgrbitvbcc | tfuser  |
++----------------------+---------+
+
+➜  terraform git:(terraform-2) yc iam access-key create --service-account-name tfuser
+access_key:
+  id: aje1q3g7cs038pcm84sr
+  service_account_id: ajefutq36ihgrbitvbcc
+  created_at: "2022-01-16T18:21:32.264929004Z"
+  key_id: access-key
+secret: secret-key
+~~~
+
+Соответственно заносим полученные данные в `variables.tf` и `terraform.tvars`
+
+Планируем и вносим изменения в инфраструктуру:
+
+~~~bash
+➜  terraform git:(terraform-2) ✗ terraform plan
+Refreshing Terraform state in-memory prior to plan...
+The refreshed state will be used to calculate this plan, but will not be
+persisted to local or remote state storage.
+
+
+------------------------------------------------------------------------
+
+An execution plan has been generated and is shown below.
+Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # yandex_storage_bucket.otus-storage-bucket will be created
+  + resource "yandex_storage_bucket" "otus-storage-bucket" {
+      + access_key         = "access-key"
+      + acl                = "private"
+      + bucket             = "deron-d"
+      + bucket_domain_name = (known after apply)
+      + force_destroy      = true
+      + id                 = (known after apply)
+      + secret_key         = (sensitive value)
+      + website_domain     = (known after apply)
+      + website_endpoint   = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+------------------------------------------------------------------------
+
+Note: You didn't specify an "-out" parameter to save this plan, so Terraform
+can't guarantee that exactly these actions will be performed if
+"terraform apply" is subsequently run.
+...
+
+~~~hcl
+terraform {
+  backend "s3" {
+    endpoint   = "storage.yandexcloud.net"
+    bucket     = "deron-d"
+    region     = "ru-central1-a"
+    key        = "terraform.tfstate"
+    # access_key = var.access_key
+    # secret_key = var.secret_key
+    access_key = "access-key"
+    secret_key = "secret-key"
+
+    skip_region_validation      = true
+    skip_credentials_validation = true
+   }
+}
+~~~
+
+Проверяем сохранение state VM's для каждого из окружений в bucket 'otus-bucket'
+~~~bash
+➜  stage pwd
+/home/dpp/test/terraform/stage
+➜  stage ll
+итого 24K
+-rw-r--r--. 1 dpp dpp  447 янв 16 23:07 backend.tf
+-rw-r--r--. 1 dpp dpp  906 янв 16 19:30 main.tf
+-rw-r--r--. 1 dpp dpp  161 янв 16 19:28 outputs.tf
+-rw-r--r--. 1 dpp dpp  703 янв 16 22:14 terraform.tfvars
+-rw-r--r--. 1 dpp dpp  358 янв 16 20:26 terraform.tfvars.example
+-rw-r--r--. 1 dpp dpp 1,2K янв 16 21:28 variables.tf
+➜  stage terraform init
+Initializing modules...
+- app in ../modules/app
+- db in ../modules/db
+
+Initializing the backend...
+
+Successfully configured the backend "s3"! Terraform will automatically
+use this backend unless the backend configuration changes.
+
+Initializing provider plugins...
+- Checking for available provider plugins...
+- Downloading plugin for provider "yandex" (terraform-providers/yandex) 0.35.0...
+
+
+Warning: registry.terraform.io: This version of Terraform has an outdated GPG key and is unable to verify new provider releases. Please upgrade Terraform to at least 0.12.31 to receive new provider updates. For details see: https://discuss.hashicorp.com/t/hcsec-2021-12-codecov-security-event-and-hashicorp-gpg-key-exposure/23512
+
+
+
+Warning: registry.terraform.io: For users on Terraform 0.13 or greater, this provider has moved to yandex-cloud/yandex. Please update your source in required_providers.
+
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+➜  stage terraform apply -auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+...
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.206
+external_ip_address_db = 51.250.10.72
+➜  stage cd ../prod
+➜  prod terraform init
+Initializing modules...
+- app in ../modules/app
+- db in ../modules/db
+
+Initializing the backend...
+
+Successfully configured the backend "s3"! Terraform will automatically
+use this backend unless the backend configuration changes.
+
+Initializing provider plugins...
+- Checking for available provider plugins...
+- Downloading plugin for provider "yandex" (terraform-providers/yandex) 0.35.0...
+
+
+Warning: registry.terraform.io: This version of Terraform has an outdated GPG key and is unable to verify new provider releases. Please upgrade Terraform to at least 0.12.31 to receive new provider updates. For details see: https://discuss.hashicorp.com/t/hcsec-2021-12-codecov-security-event-and-hashicorp-gpg-key-exposure/23512
+
+
+
+Warning: registry.terraform.io: For users on Terraform 0.13 or greater, this provider has moved to yandex-cloud/yandex. Please update your source in required_providers.
+
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+➜  prod terraform apply -auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhma4s7c99lhip6t2k0q]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmh21hft03ojnhhkrgk]
+
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.206
+external_ip_address_db = 51.250.10.72
+~~~
+
+9. Настройка provisioner. Задание со ⭐⭐
+
+Добавим переменную на включения/отключения provisioner в `variables.tf` окружений stage|prod:
+~~~hcl
+variable enable_provision {
+  description = "Enable provision"
+  default = true
+}
+~~~
+
+Добавляем в 'main.tf' для модулей app и db соответственно следующий код перед секцией connection:
+~~~hcl
+resource "null_resource" "app" {
+  count = var.enable_provision ? 1 : 0
+  triggers = {
+    cluster_instance_ids = yandex_compute_instance.app.id
+  }
+
+...
+resource "null_resource" "db" {
+  count = var.enable_provision ? 1 : 0
+  triggers = {
+    cluster_instance_ids = yandex_compute_instance.db.id
+  }
+~~~
+
+Добавляем передачу значений переменной enable_provision в секции вызова модуля 'main.tf'
+~~~hcl
+module "db|app" {
+  ...
+  enable_provision = var.enable_provision
+  ...
+~~~
+
+# **Полезное:**
+
+- [Публичный от HashiCorp реестр модулей для terraform](https://registry.terraform.io/)
+- [Загрузка состояний Terraform в Object Storage](https://cloud.yandex.ru/docs/solutions/infrastructure-management/terraform-state-storage)
+- [yandex_storage_bucket](https://registry.terraform.io/providers/yandex-cloud/yandex/latest/docs/resources/storage_bucket)
+- [Provisioners Without a Resource](https://www.terraform.io/docs/language/resources/provisioners/null_resource.html)
+
 </details>
