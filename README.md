@@ -1830,3 +1830,59 @@ module "db|app" {
 - [Provisioners Without a Resource](https://www.terraform.io/docs/language/resources/provisioners/null_resource.html)
 
 </details>
+
+# **Лекция №10: Управление конфигурацией. Знакомство с Ansible**
+> _ansible-1_
+<details>
+ <summary>Написание Ansible плейбуков</summary>
+
+## **Задание:**
+Написание Ansible плейбуков на основе имеющихся bash скриптов.
+
+Цель:
+В данном дз студент познакомится с системой управления конфигурацией Ansible. Произведет сборку образа при помощи Ansible и Packer.
+В данном задании тренируются навыки: работы с Ansible, работы с Packer.
+
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+
+План
+- Установка Ansible
+- Знакомство с базовыми функциями и инвентори
+- Выполнение различных модулей на подготовленной в прошлых ДЗ инфраструктуре
+- Пишем простой плейбук
+
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible app -m git -a 'repo=https://github.com/express42/reddit.git dest=/home/ubuntu/reddit'
+appserver | SUCCESS => {
+    "after": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "before": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "changed": false,
+    "remote_url_changed": false
+}
+➜  ansible git:(ansible-1) ✗ ansible app -m git -a 'repo=https://github.com/express42/reddit.git dest=/home/ubuntu/reddit'
+appserver | SUCCESS => {
+    "after": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "before": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "changed": false,
+    "remote_url_changed": false
+}
+~~~
+
+# **Полезное:**
+
+</details>
