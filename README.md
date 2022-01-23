@@ -1860,6 +1860,310 @@ module "db|app" {
 - Выполнение различных модулей на подготовленной в прошлых ДЗ инфраструктуре
 - Пишем простой плейбук
 
+1.Установка Ansible
+
+- Проверяем, что на рабочей машине установлен Python и Ansible
+~~~bash
+➜  ansible git:(ansible-1) python3 --version
+Python 3.6.8
+➜  ansible git:(ansible-1) ansible --version
+ansible 2.9.18
+  config file = /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/ansible.cfg
+  configured module search path = ['/home/dpp/.ansible/plugins/modules', '/usr/share/ansible/plugins/modules']
+  ansible python module location = /usr/lib/python3.6/site-packages/ansible
+  executable location = /usr/bin/ansible
+  python version = 3.6.8 (default, Aug 24 2020, 17:57:11) [GCC 8.3.1 20191121 (Red Hat 8.3.1-5)]
+~~~
+
+2. Знакомство с базовыми функциями и инвентори
+
+- Поднимем инфраструктуру, описанную в окружении stage
+~~~bash
+➜  ansible git:(ansible-1) ✗ cd ../terraform/stage
+➜  stage git:(ansible-1) ✗ terraform apply  -auto-approve
+...
+Apply complete! Resources: 4 added, 0 changed, 0 destroyed.
+Outputs:
+external_ip_address_app = 84.201.172.45
+external_ip_address_db = 84.201.172.81
+~~~
+
+- Создадим инвентори файл `ansible/inventory`, в котором укажем информацию о созданном инстансе приложения и параметры подключения к нему по SSH:
+~~~ini
+[app]
+appserver ansible_host=84.201.172.45
+
+[db]
+dbserver ansible_host=84.201.172.81
+~~~
+
+- Создадим файл `ansible.cfg` со следующим содержимым:
+~~~
+[defaults]
+inventory = ./inventory
+remote_user = ubuntu
+private_key_file = ~/.ssh/appuser
+host_key_checking = False
+retry_files_enabled = False
+~~~
+
+- Убедимся, что Ansible может управлять нашими хостами:
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible all -m ping
+dbserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+appserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+➜  ansible git:(ansible-1) ✗ ansible dbserver -m command -a uptime
+
+dbserver | CHANGED | rc=0 >>
+ 11:34:24 up 22 min,  1 user,  load average: 0.01, 0.02, 0.00
+➜  ansible git:(ansible-1) ✗ ansible app -m command -a uptime
+
+appserver | CHANGED | rc=0 >>
+ 11:34:33 up 23 min,  1 user,  load average: 0.01, 0.01, 0.00
+~~~
+
+
+3. Выполнение различных модулей на подготовленной в прошлых ДЗ инфраструктуре
+
+Проверим, что на app сервере установлены компоненты для работы приложения ( `ruby` и `bundler` ):
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible app -m command -a 'ruby -v'
+appserver | CHANGED | rc=0 >>
+ruby 2.3.1p112 (2016-04-26) [x86_64-linux-gnu]
+➜  ansible git:(ansible-1) ✗ ansible app -m command -a 'bundler -v'
+appserver | CHANGED | rc=0 >>
+Bundler version 1.11.2
+➜  ansible git:(ansible-1) ✗ ansible app -m command -a 'ruby -v; bundler -v'
+appserver | FAILED | rc=1 >>
+ruby: invalid option -;  (-h will show valid options) (RuntimeError)non-zero return code
+➜  ansible git:(ansible-1) ✗ ansible app -m shell -a 'ruby -v; bundler -v'
+appserver | CHANGED | rc=0 >>
+ruby 2.3.1p112 (2016-04-26) [x86_64-linux-gnu]
+Bundler version 1.11.2
+~~~
+
+- Проверим на хосте с БД статус сервиса MongoDB с помощью модуля`command` или `shell`
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible db -m command -a 'systemctl status mongod'
+dbserver | CHANGED | rc=0 >>
+● mongod.service - MongoDB Database Server
+   Loaded: loaded (/lib/systemd/system/mongod.service; enabled; vendor preset: enabled)
+   Active: active (running) since Sun 2022-01-23 11:11:45 UTC; 33min ago
+     Docs: https://docs.mongodb.org/manual
+ Main PID: 802 (mongod)
+   CGroup: /system.slice/mongod.service
+           └─802 /usr/bin/mongod --config /etc/mongod.conf
+
+Jan 23 11:11:45 fhm3fvo47o9589v8bq4v systemd[1]: Started MongoDB Database Server.
+➜  ansible git:(ansible-1) ✗ ansible db -m shell -a 'systemctl status mongod'
+dbserver | CHANGED | rc=0 >>
+● mongod.service - MongoDB Database Server
+   Loaded: loaded (/lib/systemd/system/mongod.service; enabled; vendor preset: enabled)
+   Active: active (running) since Sun 2022-01-23 11:11:45 UTC; 33min ago
+     Docs: https://docs.mongodb.org/manual
+ Main PID: 802 (mongod)
+   CGroup: /system.slice/mongod.service
+           └─802 /usr/bin/mongod --config /etc/mongod.conf
+
+Jan 23 11:11:45 fhm3fvo47o9589v8bq4v systemd[1]: Started MongoDB Database Server.
+~~~
+
+- Тоже самое, но и применением модуля ansible `service`:
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible db -m service -a name=mongod
+dbserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "name": "mongod",
+    "status": {
+        "ActiveEnterTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "ActiveEnterTimestampMonotonic": "18376233",
+        "ActiveExitTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "ActiveExitTimestampMonotonic": "18356944",
+        "ActiveState": "active",
+        "After": "system.slice basic.target network.target systemd-journald.socket sysinit.target",
+        "AllowIsolate": "no",
+        "AmbientCapabilities": "0",
+        "AssertResult": "yes",
+        "AssertTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "AssertTimestampMonotonic": "18362276",
+        "Before": "shutdown.target multi-user.target",
+        "BlockIOAccounting": "no",
+        "BlockIOWeight": "18446744073709551615",
+        "CPUAccounting": "no",
+        "CPUQuotaPerSecUSec": "infinity",
+        "CPUSchedulingPolicy": "0",
+        "CPUSchedulingPriority": "0",
+        "CPUSchedulingResetOnFork": "no",
+        "CPUShares": "18446744073709551615",
+        "CPUUsageNSec": "18446744073709551615",
+        "CanIsolate": "no",
+        "CanReload": "no",
+        "CanStart": "yes",
+        "CanStop": "yes",
+        "CapabilityBoundingSet": "18446744073709551615",
+        "ConditionResult": "yes",
+        "ConditionTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "ConditionTimestampMonotonic": "18362275",
+        "Conflicts": "shutdown.target",
+        "ControlGroup": "/system.slice/mongod.service",
+        "ControlPID": "0",
+        "DefaultDependencies": "yes",
+        "Delegate": "no",
+        "Description": "MongoDB Database Server",
+        "DevicePolicy": "auto",
+        "Documentation": "https://docs.mongodb.org/manual",
+        "EnvironmentFile": "/etc/default/mongod (ignore_errors=yes)",
+        "ExecMainCode": "0",
+        "ExecMainExitTimestampMonotonic": "0",
+        "ExecMainPID": "802",
+        "ExecMainStartTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "ExecMainStartTimestampMonotonic": "18376194",
+        "ExecMainStatus": "0",
+        "ExecStart": "{ path=/usr/bin/mongod ; argv[]=/usr/bin/mongod --config /etc/mongod.conf ; ignore_errors=no ; start_time=[Sun 2022-01-23 11:11:45 UTC] ; stop_time=[n/a] ; pid=802 ; code=(null) ; status=0/0 }",
+        "FailureAction": "none",
+        "FileDescriptorStoreMax": "0",
+        "FragmentPath": "/lib/systemd/system/mongod.service",
+        "Group": "mongodb",
+        "GuessMainPID": "yes",
+        "IOScheduling": "0",
+        "Id": "mongod.service",
+        "IgnoreOnIsolate": "no",
+        "IgnoreSIGPIPE": "yes",
+        "InactiveEnterTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "InactiveEnterTimestampMonotonic": "18359688",
+        "InactiveExitTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "InactiveExitTimestampMonotonic": "18376233",
+        "JobTimeoutAction": "none",
+        "JobTimeoutUSec": "infinity",
+        "KillMode": "control-group",
+        "KillSignal": "15",
+        "LimitAS": "18446744073709551615",
+        "LimitASSoft": "18446744073709551615",
+        "LimitCORE": "18446744073709551615",
+        "LimitCORESoft": "0",
+        "LimitCPU": "18446744073709551615",
+        "LimitCPUSoft": "18446744073709551615",
+        "LimitDATA": "18446744073709551615",
+        "LimitDATASoft": "18446744073709551615",
+        "LimitFSIZE": "18446744073709551615",
+        "LimitFSIZESoft": "18446744073709551615",
+        "LimitLOCKS": "18446744073709551615",
+        "LimitLOCKSSoft": "18446744073709551615",
+        "LimitMEMLOCK": "18446744073709551615",
+        "LimitMEMLOCKSoft": "18446744073709551615",
+        "LimitMSGQUEUE": "819200",
+        "LimitMSGQUEUESoft": "819200",
+        "LimitNICE": "0",
+        "LimitNICESoft": "0",
+        "LimitNOFILE": "64000",
+        "LimitNOFILESoft": "64000",
+        "LimitNPROC": "64000",
+        "LimitNPROCSoft": "64000",
+        "LimitRSS": "18446744073709551615",
+        "LimitRSSSoft": "18446744073709551615",
+        "LimitRTPRIO": "0",
+        "LimitRTPRIOSoft": "0",
+        "LimitRTTIME": "18446744073709551615",
+        "LimitRTTIMESoft": "18446744073709551615",
+        "LimitSIGPENDING": "7846",
+        "LimitSIGPENDINGSoft": "7846",
+        "LimitSTACK": "18446744073709551615",
+        "LimitSTACKSoft": "8388608",
+        "LoadState": "loaded",
+        "MainPID": "802",
+        "MemoryAccounting": "no",
+        "MemoryCurrent": "18446744073709551615",
+        "MemoryLimit": "18446744073709551615",
+        "MountFlags": "0",
+        "NFileDescriptorStore": "0",
+        "Names": "mongod.service",
+        "NeedDaemonReload": "no",
+        "Nice": "0",
+        "NoNewPrivileges": "no",
+        "NonBlocking": "no",
+        "NotifyAccess": "none",
+        "OOMScoreAdjust": "0",
+        "OnFailureJobMode": "replace",
+        "PIDFile": "/var/run/mongodb/mongod.pid",
+        "PermissionsStartOnly": "no",
+        "PrivateDevices": "no",
+        "PrivateNetwork": "no",
+        "PrivateTmp": "no",
+        "ProtectHome": "no",
+        "ProtectSystem": "no",
+        "RefuseManualStart": "no",
+        "RefuseManualStop": "no",
+        "RemainAfterExit": "no",
+        "Requires": "sysinit.target system.slice",
+        "Restart": "no",
+        "RestartUSec": "100ms",
+        "Result": "success",
+        "RootDirectoryStartOnly": "no",
+        "RuntimeDirectoryMode": "0755",
+        "RuntimeMaxUSec": "infinity",
+        "SameProcessGroup": "no",
+        "SecureBits": "0",
+        "SendSIGHUP": "no",
+        "SendSIGKILL": "yes",
+        "Slice": "system.slice",
+        "StandardError": "inherit",
+        "StandardInput": "null",
+        "StandardOutput": "journal",
+        "StartLimitAction": "none",
+        "StartLimitBurst": "5",
+        "StartLimitInterval": "10000000",
+        "StartupBlockIOWeight": "18446744073709551615",
+        "StartupCPUShares": "18446744073709551615",
+        "StateChangeTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "StateChangeTimestampMonotonic": "18376233",
+        "StatusErrno": "0",
+        "StopWhenUnneeded": "no",
+        "SubState": "running",
+        "SyslogFacility": "3",
+        "SyslogLevel": "6",
+        "SyslogLevelPrefix": "yes",
+        "SyslogPriority": "30",
+        "SystemCallErrorNumber": "0",
+        "TTYReset": "no",
+        "TTYVHangup": "no",
+        "TTYVTDisallocate": "no",
+        "TasksAccounting": "no",
+        "TasksCurrent": "18446744073709551615",
+        "TasksMax": "18446744073709551615",
+        "TimeoutStartUSec": "1min 30s",
+        "TimeoutStopUSec": "1min 30s",
+        "TimerSlackNSec": "50000",
+        "Transient": "no",
+        "Type": "simple",
+        "UMask": "0022",
+        "UnitFilePreset": "enabled",
+        "UnitFileState": "enabled",
+        "User": "mongodb",
+        "UtmpMode": "init",
+        "WantedBy": "multi-user.target",
+        "WatchdogTimestamp": "Sun 2022-01-23 11:11:45 UTC",
+        "WatchdogTimestampMonotonic": "18376228",
+        "WatchdogUSec": "0"
+    }
+}
+~~~
+
+- Используем модуль git для клонирования репозитория с приложением на app сервер:
 ~~~bash
 ➜  ansible git:(ansible-1) ✗ ansible app -m git -a 'repo=https://github.com/express42/reddit.git dest=/home/ubuntu/reddit'
 appserver | SUCCESS => {
@@ -1882,6 +2186,152 @@ appserver | SUCCESS => {
     "remote_url_changed": false
 }
 ~~~
+Как мы видим, повторное выполнение этой команды проходит успешно, только переменная `changed` будет `false` (что значит, что изменения не произошли)
+
+4. Напишем простой плейбук
+
+Реализуем простой плейбук [clone.yml](./ansible/clone.yml) , который выполняет аналогичные предыдущему слайду действия (клонирование репозитория).
+
+Выполним его, запустив команду ansible-playbook 'clone.yml'
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible-playbook clone.yml
+
+PLAY [Clone] ************************************************************************************************************************************************
+
+TASK [Gathering Facts] **************************************************************************************************************************************
+ok: [appserver]
+
+TASK [Clone repo] *******************************************************************************************************************************************
+ok: [appserver]
+
+PLAY RECAP **************************************************************************************************************************************************
+appserver                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+Т.к. репозиторий уже присутствует на хосте, то сhanged=0
+
+- Попробуем по другому
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible app -m command -a 'rm -rf ~/reddit'
+[WARNING]: Consider using the file module with state=absent rather than running 'rm'.  If you need to use command because file is insufficient you can add
+'warn: false' to this command task or set 'command_warnings=False' in ansible.cfg to get rid of this message.
+appserver | CHANGED | rc=0 >>
+➜  ansible git:(ansible-1) ✗ ansible-playbook clone.yml
+PLAY [Clone] ************************************************************************************************************************************************
+TASK [Gathering Facts] **************************************************************************************************************************************
+ok: [appserver]
+TASK [Clone repo] *******************************************************************************************************************************************
+changed: [appserver]
+PLAY RECAP **************************************************************************************************************************************************
+appserver                  : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Видим. что  changed=1
+
+Задание со ⭐
+
+- Создадим файл [inventory.json](./ansible/inventory.json)
+- Заменим в `ansible.cfg`  строку `inventory = ./inventory` на `inventory = ./inventory.yml`
+- Проверяем
+
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible all -m ping
+dbserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+appserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+~~~
+
+- Создаем скрипт `inventory.sh`, позволяющий Ansible генерирующий его "на лету" со следующим содержимым:
+
+~~~bash
+#!/bin/bash
+
+yc_compute_instance_app=($(yc compute instance list | grep app | awk -F\| '{print $3 $6}'))
+yc_compute_instance_db=($(yc compute instance list | grep db |  awk -F\| '{print $3 $6}'))
+
+if [ $# -lt 1 ]
+then
+        echo "Usage : $0 --list or $0 --host"
+        exit
+fi
+
+case "$1" in
+
+--list)
+cat<<EOF
+{
+    "_meta": {
+        "hostvars": {
+            "${yc_compute_instance_app[0]}": {
+                "ansible_host": "${yc_compute_instance_app[1]}"
+            },
+            "${yc_compute_instance_db[0]}": {
+                "ansible_host": "${yc_compute_instance_db[1]}"
+            }
+        }
+    },
+    "all": {
+        "children": [
+            "app",
+            "db",
+            "ungrouped"
+        ]
+    },
+    "app": {
+        "hosts": [
+            "${yc_compute_instance_app[0]}"
+        ]
+    },
+    "db": {
+        "hosts": [
+            "${yc_compute_instance_db[0]}"
+        ]
+    }
+}
+EOF
+;;
+--host)
+cat<<EOF
+{
+
+}
+EOF
+;;
+esac
+~~~
+
+- Заменим в `ansible.cfg`  строку `inventory = ./inventory.yml` на `inventory = ./inventory.sh`
+
+- Проверяем
+
+~~~bash
+➜  ansible git:(ansible-1) ✗ ansible all -m ping
+reddit-db | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+reddit-app | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+~~~
+
 
 # **Полезное:**
 
