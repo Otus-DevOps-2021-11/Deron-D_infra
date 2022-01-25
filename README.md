@@ -2336,3 +2336,105 @@ reddit-app | SUCCESS => {
 # **Полезное:**
 
 </details>
+
+# **Лекция №11: Продолжение знакомства с Ansible: templates, handlers, dynamic inventory, vault, tags**
+> _ansible-2_
+<details>
+ <summary>Управление настройками хостов и деплой приложения при помощи Ansible.</summary>
+
+## **Задание:**
+Цель:
+В данном дз студент продолжит знакомство с Ansible. Продолжит написание плейбуков для автоматизации конфигурирования серверов.
+В данном задании тренируются навыки: работы с Ansible, написания плейбуков, формирования инвентарей.
+
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+
+### План
+- Используем плейбуки, хендлеры и шаблоны для конфигурации окружения и деплоя тестового приложения. Подход один плейбук, один сценарий (play)
+- Аналогично один плейбук, но много сценариев
+- И много плейбуков.
+- Изменим провижн образов Packer на Ansible-плейбуки
+
+Т.к. был настроен провижн в ДЗ по Terraform, то выключаем его установкой  `enable_provision = false` в файле
+`terraform/stage/terraform.tfvars`
+Пересоздаем окружение stage и проверяем отсутствие провижионинга:
+
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible app -i inventory.sh  -m command -a 'systemctl status puma.service'
+reddit-app | FAILED | rc=3 >>
+● puma.service
+   Loaded: not-found (Reason: No such file or directory)
+   Active: inactive (dead)non-zero return code
+➜  ansible git:(ansible-2) ✗ ansible db -i inventory.sh  -m shell -a 'cat /etc/mongod.conf | grep -i bindip'
+reddit-db | CHANGED | rc=0 >>
+  bindIp: 127.0.0.1
+~~~
+
+1. Сценарий для MongoDB
+Используем модуль `template`, чтобы скопировать параметризированный локальный конфиг файл MongoDB на удаленный хост по указанному пути. Добавим task в файл `ansible/reddit_app.yml`:
+~~~yaml
+---
+- name: Configure hosts & deploy application
+  hosts: all
+  tasks:
+    - name: Change mongo config file
+      become: true  # <-- Выполнить задание от root
+      template:
+        src: templates/mongod.conf.j2  # <-- Путь до локального файла-шаблона
+        dest: /etc/mongod.conf  # <-- Путь на удаленном хосте
+        mode: 0644  # <-- Права на файл, которые нужно установить
+      tags: db-tag
+~~~
+
+Создадим шаблон конфига MongoDB `templates/mongod.conf.j2`
+~~~
+# Where and how to store data.
+storage:
+  dbPath: /var/lib/mongodb
+  journal:
+    enabled: true
+
+# where to write logging data.
+systemLog:
+  destination: file
+  logAppend: true
+  path: /var/log/mongodb/mongod.log
+
+# network interfaces
+net:
+  port: {{ mongo_port | default('27017') }}
+  bindIp: {{ mongo_bind_ip }}
+~~~
+
+Пробный прогон
+~~~
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit db
+
+PLAY [Configure hosts & deploy application] ***********************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] ***********************************************************************************************************************
+fatal: [reddit-db]: FAILED! => {"changed": false, "msg": "AnsibleUndefinedVariable: 'mongo_bind_ip' is undefined"}
+
+PLAY RECAP ********************************************************************************************************************************************
+reddit-db                  : ok=1    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+~~~
+
+Определим в недостающую `reddit_app.yml` переменную `mongo_bind_ip: 0.0.0.0` для шаблона `templates/mongod.conf.j2`
+
+
+
+# **Полезное:**
+
+</details>
