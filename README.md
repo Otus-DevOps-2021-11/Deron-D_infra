@@ -2380,7 +2380,9 @@ reddit-db | CHANGED | rc=0 >>
 ~~~
 
 1. Сценарий для MongoDB
+
 Используем модуль `template`, чтобы скопировать параметризированный локальный конфиг файл MongoDB на удаленный хост по указанному пути. Добавим task в файл `ansible/reddit_app.yml`:
+
 ~~~yaml
 ---
 - name: Configure hosts & deploy application
@@ -2396,7 +2398,7 @@ reddit-db | CHANGED | rc=0 >>
 ~~~
 
 Создадим шаблон конфига MongoDB `templates/mongod.conf.j2`
-~~~
+~~~j2
 # Where and how to store data.
 storage:
   dbPath: /var/lib/mongodb
@@ -2481,6 +2483,197 @@ changed: [reddit-db]
 PLAY RECAP *********************************************************************************************************************************************
 reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ~~~
+
+2. Настройка инстанса приложения
+
+Создадим директорию files внутри директории ansible и добавим туда файл [puma.service](./files/puma.service).
+
+Добавим в наш сценарий таск для копирования unit-файла на хост приложения. Для копирования простого файла на удаленный хост, используем модуль `copy`, а для настройки автостарта Puma-сервера используем модуль `systemd`.
+~~~yaml
+tasks:
+  - name: Change mongo config file
+...
+  - name: Add unit file for Puma
+    become: true
+    copy:
+      src: files/puma.service
+      dest: /etc/systemd/system/puma.service
+    tags: app-tag
+    notify: reload puma
+  - name: enable puma
+    become: true
+    systemd: name=puma enabled=yes
+    tags: app-tag
+~~~
+
+Не забудем добавить новый handler, который укажет systemd, что unit для сервиса изменился и его следует перечитать:
+
+~~~yaml
+handlers:
+  - name: restart mongod
+    become: true
+    service: name=mongod state=restarted
+  - name: reload puma
+    become: true
+    systemd: name=puma state=restarted
+~~~
+
+Так же, unit-файл для вебсервера изменился.
+В него добавилась строка чтения переменных окружения из файла:
+Через переменную окружения мы будем передавать адрес инстанса БД, чтобы приложение знало, куда ему обращаться для хранения данных.
+
+~~~yaml
+EnvironmentFile=/home/appuser/db_config
+~~~
+
+Создадим шаблон в директории `templates/db_config.j2` куда добавим следующую строку:
+~~~yaml
+DATABASE_URL={{ db_host }}
+~~~
+
+Как видим, данный шаблон содержит присвоение переменной `DATABASE_URL` значения, которое мы передаем через Ansible переменную `db_host`.
+
+Добавим таск для копирования созданного шаблона:
+
+~~~yaml
+- name: Add unit file for Puma
+...
+- name: Add config for DB connection
+  template:
+    src: templates/db_config.j2
+    dest: /home/appuser/db_config
+  tags: app-tag
+- name: enable puma
+  become: true
+  systemd: name=puma enabled=yes
+  tags: app-tag
+~~~
+
+Уточним значение внутреннего IP-адреса инстанса базы данных и присвоим его переменной `db_host`.
+~~~bash
+ansible git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm0ovicvvgqijaa714j | reddit-db  | ru-central1-a | RUNNING | 51.250.7.51  | 10.128.0.31 |
+| fhmaglhid4arfp0n627m | reddit-app | ru-central1-a | RUNNING | 51.250.6.184 | 10.128.0.30 |
++----------------------+------------+---------------+---------+--------------+-------------+
+~~~
+
+~~~yaml
+---
+- name: Configure hosts & deploy application
+  hosts: all
+  vars:
+    mongo_bind_ip: 0.0.0.0
+    db_host: 10.128.0.31  # <-- подставьте сюда ваш INTERNAL IP reddit-db
+  tasks:
+...
+~~~
+
+Пробный прогон:
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit app --tags app-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Применим наши таски плейбука с тегом `app-tag` для группы хостов `app`
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --limit app --tags app-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+3. Деплой
+
+Добавим еще несколько тасков в сценарий нашего плейбука.
+Используем модули `git` и `bundle` для клонирования последней версии кода нашего приложения и установки зависимых Ruby Gems через
+`bundle`.
+
+Выполняем деплой
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit app --tags deploy-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the git] *********************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [Bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --limit app --tags deploy-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the git] *********************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [Bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Проверяем работу приложения:
+
+![screen](./screens/screen1.png)
 
 
 # **Полезное:**
