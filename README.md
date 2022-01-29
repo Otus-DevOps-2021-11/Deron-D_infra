@@ -2783,7 +2783,145 @@ reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    s
 Проверим и запустим созданную конфигурацию плейбуков:
 
 ~~~bash
+➜  ansible git:(ansible-2) ✗ cd ../terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve=true
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmoe56h7o37v4ppub97]
+module.db.yandex_compute_instance.db: Destroying... [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Destroying... [id=fhmoe56h7o37v4ppub97]
+module.app.yandex_compute_instance.app: Destruction complete after 10s
+module.db.yandex_compute_instance.db: Destruction complete after 10s
 
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve=true
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Creation complete after 41s [id=fhm18qjnavo9cl0560q3]
+module.db.yandex_compute_instance.db: Creation complete after 47s [id=fhm78l5vvqomhm3hl8qm]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.2.247
+external_ip_address_db = 51.250.13.68
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm18qjnavo9cl0560q3 | reddit-app | ru-central1-a | RUNNING | 51.250.2.247 | 10.128.0.3  |
+| fhm78l5vvqomhm3hl8qm | reddit-db  | ru-central1-a | RUNNING | 51.250.13.68 | 10.128.0.34 |
++----------------------+------------+---------------+---------+--------------+-------------+
+
+➜  ansible git:(ansible-2) ✗
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml --check
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] *********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+fatal: [reddit-app]: FAILED! => {"changed": false, "msg": "Failed to find required executable git in paths: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"}
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=7    changed=5    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] *********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] ***********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=10   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ~~~
 
 # **Полезное:**
