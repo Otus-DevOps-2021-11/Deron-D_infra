@@ -2768,14 +2768,23 @@ reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    s
 ~~~
 
 5. Несколько плейбуков
-В директории ansible создадим три новых файла:
-   'app.yml'
-   'db.yml'
-   'deploy.yml'
-Заодно переименуем наши предыдущие плейбуки:
-   `reddit_app.yml`  -> `reddit_app_one_play.yml`
-   `reddit_app2.yml` -> `reddit_app_multiple_plays.yml`
+В директории ansible создадим 4 новых файла:
 
+- `app.yml`
+- `db.yml`
+- `deploy.yml`
+- `site.yml`
+
+Заодно переименуем наши предыдущие плейбуки:
+
+- `reddit_app.yml`  -> `reddit_app_one_play.yml`
+- `reddit_app2.yml` -> `reddit_app_multiple_plays.yml`
+
+Проверим и запустим созданную конфигурацию плейбуков:
+
+~~~bash
+
+~~~
 
 # **Полезное:**
 
