@@ -6,7 +6,7 @@
   # Установим в цикле все зависимости
   - name: Install ruby and rubygems and required packages
     apt:
-      name: {{ item }}
+      name: "{{ item }}"
       state: present
       update_cache: true
     loop:
