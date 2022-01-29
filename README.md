@@ -2673,7 +2673,7 @@ reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    s
 
 Проверяем работу приложения:
 
-![screen](./screens/screen1.png)
+![screen](./ansible/screens/screen1.png)
 
 
 # **Полезное:**
