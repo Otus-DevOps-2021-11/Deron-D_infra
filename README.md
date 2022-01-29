@@ -2675,6 +2675,107 @@ reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    s
 
 ![screen](./ansible/screens/screen1.png)
 
+4. Напишем плейбук reddit_app2.yml, в котором определим в нем несколько сценариев (plays), в которые объединим задачи, относящиеся к используемым в плейбуке тегам.
+
+~~~bash
+➜  ansible git:(ansible-2) ✗ cd ../terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhms89o48s8i7ogvtdql]
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhmkslgklc0mkc2s2073]
+module.db.yandex_compute_instance.db: Destroying... [id=fhmkslgklc0mkc2s2073]
+module.app.yandex_compute_instance.app: Destroying... [id=fhms89o48s8i7ogvtdql]
+module.db.yandex_compute_instance.db: Destruction complete after 10s
+module.app.yandex_compute_instance.app: Destruction complete after 10s
+
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Creation complete after 41s [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Creation complete after 41s [id=fhmoe56h7o37v4ppub97]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.3.193
+external_ip_address_db = 51.250.2.247
+➜  stage git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm6iidft5e8gvclqker | reddit-db  | ru-central1-a | RUNNING | 51.250.2.247 | 10.128.0.31 |
+| fhmoe56h7o37v4ppub97 | reddit-app | ru-central1-a | RUNNING | 51.250.3.193 | 10.128.0.7  |
++----------------------+------------+---------------+---------+--------------+-------------+
+
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app2.yml
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+ok: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+ok: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] ***********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=9    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+5. Несколько плейбуков
+В директории ansible создадим три новых файла:
+   'app.yml'
+   'db.yml'
+   'deploy.yml'
+Заодно переименуем наши предыдущие плейбуки:
+   `reddit_app.yml`  -> `reddit_app_one_play.yml`
+   `reddit_app2.yml` -> `reddit_app_multiple_plays.yml`
+
 
 # **Полезное:**
 

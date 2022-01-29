@@ -5,4 +5,3 @@ variables.json
 *.tfvars
 .terraform/
 *.retry
-terraform/stage/backend.tf
