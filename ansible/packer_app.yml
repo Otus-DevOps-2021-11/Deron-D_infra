@@ -5,7 +5,10 @@
   tasks:
   # Установим в цикле все зависимости
   - name: Install ruby and rubygems and required packages
-    apt: "name={{ item }} state=present update_cache=true"
+    apt:
+      name: {{ item }}
+      state: present
+      update_cache: true
     loop:
       - ruby-full
       - ruby-bundler
