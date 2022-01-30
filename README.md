@@ -4157,6 +4157,135 @@ dbserver                   : ok=4    changed=2    unreachable=0    failed=0    s
 
 ### 4. Используем Ansible Vault для наших окружений
 
+Подготовим плейбук для создания пользователей, пароль пользователей будем хранить в зашифрованном виде в файле credentials.yml:
+
+- Создадим файл `~/.ansible/vault.key` со произвольной строкой ключа
+- Изменим файл ansible.cfg, добавим опцию `vault_password_file` в секцию `[defaults]`
+~~~ini
+[defaults]
+...
+vault_password_file = vault.key
+~~~
+- Добавим в .gitignore строку для файла vault.key.
+
+- Добавим плейбук для создания пользователей - файл [ansible/playbooks/users.yml](./ansible/playbooks/users.yml)
+~~~yaml
+---
+- name: Create users
+  hosts: all
+  become: true
+
+  vars_files:
+    - "{{ inventory_dir }}/credentials.yml"
+
+  tasks:
+    - name: create users
+      user:
+        name: "{{ item.key }}"
+        password: "{{ item.value.password|password_hash('sha512', 65534|random(seed=inventory_hostname)|string) }}"
+        groups: "{{ item.value.groups | default(omit) }}"
+      with_dict: "{{ credentials.users }}"
+~~~
+
+Создадим файл с данными пользователей для каждого окружения:
+~~~yaml
+ansible/environments/prod/credentials.yml
+
+---
+credentials:
+  users:
+    admin:
+      password: admin123
+      groups: sudo
+
+
+ansible/environments/stage/credentials.yml
+
+---
+credentials:
+  users:
+    admin:
+      password: qwerty123
+      groups: sudo
+    qauser:
+      password: test123
+~~~
+
+- Зашифруем файлы используя vault.key (используем одинаковый для всех окружений):
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-vault encrypt environments/prod/credentials.yml
+Encryption successful
+➜  ansible git:(ansible-3) ✗ ansible-vault encrypt environments/stage/credentials.yml
+Encryption successful
+~~~
+
+- Добавим вызов плейбука в файл site.yml и выполним его для stage окружения:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+...
+TASK [create users] *******************************************************************************************************************************
+changed: [appserver] => (item={'key': 'admin', 'value': {'password': '➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.5.15
+admin@51.250.5.15's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+$ exit
+Connection to 51.250.5.15 closed.
+➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.10.243
+admin@51.250.10.243's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+', 'groups': 'sudo'}})
+changed: [dbserver] => (item={'key': 'admin', 'value': {'password': 'qwerty123', 'groups': 'sudo'}})
+changed: [appserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
+changed: [dbserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=23   changed=1    unreachable=0    failed=0    skipped=17   rescued=0    ignored=0
+dbserver                   : ok=5    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+- Проверяем:
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.5.15
+admin@51.250.5.15's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.10.243
+admin@51.250.10.243's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+$ sudo -s
+[sudo] password for admin:
+#
+~~~
+
 # **Полезное:**
 
 </details>
