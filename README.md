@@ -3251,11 +3251,21 @@ db
 8 directories, 8 files
 ~~~
 
-Создадим роль для конфигурации MongoDB:
-На основе плейбука [db.yml](./ansible/db.yml) создадим файлы
+Создадим роль для конфигурации MongoDB.
+На основе плейбука [db.yml](./ansible/db.yml) создадим файлы:
 - [ansible/roles/db/tasks/main.yml](./ansible/roles/db/tasks/main.yml)
 - [ansible/roles/db/handlers/main.yml](./ansible/roles/db/handlers/main.yml)
 - [ansible/roles/db/defaults/main.yml](./ansible/roles/db/defaults/main.yml)
+
+В директорию шаблонов роли `ansble/roles/db/templates` скопируем шаблонизированный конфиг для MongoDB из директории `ansible/templates`.
+
+
+Создадим роль для управления конфигурацией инстансаприложения.
+На основе плейбука [app.yml](./ansible/app.yml) создадим файлы:
+- [ansible/roles/app/tasks/main.yml](./ansible/roles/app/tasks/main.yml)
+- [ansible/roles/app/handlers/main.yml](./ansible/roles/app/handlers/main.yml)
+- [ansible/roles/app/defaults/main.yml](./ansible/roles/app/defaults/main.yml)
+
 
 
 # **Полезное:**
