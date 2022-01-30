@@ -3433,7 +3433,9 @@ host_key_checking = False
 ~~~
 
 Переменные групп хостов
+
 Директория `group_vars`, созданная в директории плейбука или инвентори файла, позволяет создавать файлы (имена, которых должны соответствовать названиям групп в инвентори файле) для определения переменных для группы хостов.
+
 Создадим директорию `group_vars` в директориях наших окружений `environments/prod` и `environments/stage`.
 
 Создадим в директории `group_vars` файлы для хранения значений переменных для окружения `stage`:
@@ -3446,7 +3448,647 @@ host_key_checking = False
 - [ansible/environments/prod/group_vars/app](./ansible/environments/prod/group_vars/app)
 - [ansible/environments/prod/group_vars/db](./ansible/environments/prod/group_vars/db)
 
+Для хостов из каждого окружения мы определили переменную
+env, которая содержит название окружения.
+Теперь настроим вывод информации об окружении, с которым
+мы работаем, при применении плейбуков.
+Определим переменную по умолчанию env в используемых ролях.
 
+Для роли app в файле [ansible/roles/app/defaults/main.yml](./ansible/roles/app/defaults/main.yml):
+~~~yaml
+# defaults file for app
+db_host: 127.0.0.1
+env: local
+~~~
+
+Для роли db в файле [ansible/roles/db/defaults/main.yml](./ansible/roles/db/defaults/main.yml):
+~~~yaml
+# defaults file for db
+mongo_port: 27017
+mongo_bind_ip: 127.0.0.1
+env: local
+~~~
+
+Будем выводить информацию о том, в каком окружении находится конфигурируемый хост. Воспользуемся модулем debug для вывода значения переменной. Добавим следующий таск в начало наших ролей.
+Для роли app [(файл ansible/roles/app/tasks/main.yml)](./ansible/roles/app/tasks/main.yml):
+
+~~~yaml
+# tasks file for app
+- name: Show info about the env this host belongs to
+  debug:
+    msg: "This host is in {{ env }} environment!!!"
+~~~
+
+Добавим такой же таск в роль db [(файл ansible/roles/db/tasks/main.yml)](./ansible/roles/db/tasks/main.yml):
+~~~yaml
+# tasks file for db
+- name: Show info about the env this host belongs to
+  debug: msg="This host is in {{ env }} environment!!!"
+~~~
+
+Организуем плейбуки
+Создадим директорию ansible/playbooks и перенесем туда все наши плейбуки, в том числе из прошлого ДЗ.
+В директории ansible у нас остались еще файлы из прошлых ДЗ, которые нам не особо нужны. Создадим директорию ansible/old и перенесем туда все, что не относится к текущей конфигурации.
+
+~~~bash
+➜  ansible git:(ansible-3) ✗ tree -L 3
+.
+├── ansible.cfg
+├── environments
+│   ├── prod
+│   │   ├── group_vars
+│   │   └── inventory
+│   └── stage
+│       ├── group_vars
+│       └── inventory
+├── old
+│   ├── files
+│   │   └── puma.service
+│   ├── inventory.json
+│   ├── inventory.sh
+│   ├── inventory.yml
+│   └── templates
+│       ├── db_config.j2
+│       └── mongod.conf.j2
+├── playbooks
+│   ├── app.yml
+│   ├── clone.yml
+│   ├── db.yml
+│   ├── deploy.yml
+│   ├── packer_app.yml
+│   ├── packer_db.yml
+│   ├── reddit_app_multiple_plays.yml
+│   ├── reddit_app_one_play.yml
+│   └── site.yml
+├── plugins
+│   └── inventory
+├── requirements.txt
+├── roles
+│   ├── app
+│   │   ├── defaults
+│   │   ├── files
+│   │   ├── handlers
+│   │   ├── meta
+│   │   ├── README.md
+│   │   ├── tasks
+│   │   ├── templates
+│   │   ├── tests
+│   │   └── vars
+│   └── db
+│       ├── defaults
+│       ├── files
+│       ├── handlers
+│       ├── meta
+│       ├── README.md
+│       ├── tasks
+│       ├── templates
+│       ├── tests
+│       └── vars
+└── screens
+    └── screen1.png
+~~~
+
+
+Улучшим файл ansible.cfg
+Заодно улучшим наш ansible.cfg. Для этого приведем его к такому виду:
+~~~ini
+[defaults]
+inventory = ./environments/stage/inventory
+remote_user = ubuntu
+private_key_file = ~/.ssh/ubuntu
+# Отключим проверку SSH Host-keys (поскольку они всегда разные для новых инстансов)
+host_key_checking = False
+# Отключим создание *.retry-файлов (они нечасто нужны, но мешаются под руками)
+retry_files_enabled = False
+# # Явно укажем расположение ролей (можно задать несколько путей через ; )
+roles_path = ./roles
+
+[diff]
+# Включим обязательный вывод diff при наличии изменений и вывод 5 строк контекста
+always = True
+context = 5
+~~~
+
+Проверка работы с окружениями
+~~~bash
+➜  stage git:(ansible-3) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm9lkc0tg6q4hon4a9p]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmfh2vajkdocqp8sf8a]
+module.app.yandex_compute_instance.app: Destroying... [id=fhmfh2vajkdocqp8sf8a]
+module.db.yandex_compute_instance.db: Destroying... [id=fhm9lkc0tg6q4hon4a9p]
+module.db.yandex_compute_instance.db: Destruction complete after 9s
+module.app.yandex_compute_instance.app: Destruction complete after 9s
+
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-3) ✗ terraform apply --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Creating...
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Creation complete after 42s [id=fhm76jsrtjc2ha1ama8f]
+module.app.yandex_compute_instance.app: Creation complete after 45s [id=fhm187e9e0ji8gv7nn4b]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 84.201.174.143
+external_ip_address_db = 51.250.4.12
+➜  stage git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+----------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP   | INTERNAL IP |
++----------------------+------------+---------------+---------+----------------+-------------+
+| fhm187e9e0ji8gv7nn4b | reddit-app | ru-central1-a | RUNNING | 84.201.174.143 | 10.128.0.23 |
+| fhm76jsrtjc2ha1ama8f | reddit-db  | ru-central1-a | RUNNING | 51.250.4.12    | 10.128.0.24 |
++----------------------+------------+---------------+---------+----------------+-------------+
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml --check
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-153078393a4rqyq/tmp_70_c3e5/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-153078393a4rqyq/tmpu5pk15uq/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.24
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+skipping: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=9    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml --check
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-15309556xyrpd39/tmpsipxj_hz/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-15309556xyrpd39/tmptdzd4sa3/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.24
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+skipping: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=9    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+...
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=11   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Проверим работу приложения
+~~~bash
+➜  ansible git:(ansible-3) ✗ curl http://84.201.174.143:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+Настройка Prod окружения
+
+Для проверки настройки prod окружения сначала удалим инфраструктуру окружения stage. Затем поднимем инфраструктуру для prod окружения.
+~~~bash
+➜  ansible git:(ansible-3) ✗ cd ../terraform/stage
+➜  stage git:(ansible-3) ✗ terraform destroy --auto-approve
+➜  stage git:(ansible-3) ✗ cd ../prod
+➜  prod git:(ansible-3) ✗ terraform apply --auto-approve
+➜  prod git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ ansible-playbook -i environments/prod/inventory playbooks/site.yml
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in prod environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-1534853n7gvhz0s/tmp17pe6aa5/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in prod environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-1534853n7gvhz0s/tmp13z45os5/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.20
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+>> Newly checked out 5c217c565c1122c5343dc0514c116ae816c17ca2
+changed: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [restart puma] ********************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=11   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+----------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP   | INTERNAL IP |
++----------------------+------------+---------------+---------+----------------+-------------+
+| fhmelc35f4nnhl7sb59l | reddit-app | ru-central1-a | RUNNING | 62.84.115.38   | 10.128.0.25 |
+| fhmfef40vfpbs6astk2r | reddit-db  | ru-central1-a | RUNNING | 84.201.158.213 | 10.128.0.20 |
++----------------------+------------+---------------+---------+----------------+-------------+
+
+➜  ansible git:(ansible-3) ✗ curl http://62.84.115.38:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+3. Используем коммьюнити роль nginx
 
 # **Полезное:**
 
