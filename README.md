@@ -3192,7 +3192,9 @@ dbserver                   : ok=3    changed=2    unreachable=0    failed=0    s
 
 ## **Выполнено:**
 
-1. Ansible Galaxy
+### 1. Переносим созданные плейбуки в раздельные роли
+
+#### Ansible Galaxy
 
 ~~~bash
 ➜  Deron-D_infra git:(ansible-3) ✗ ansible-galaxy -h
@@ -3215,7 +3217,7 @@ optional arguments:
 ~~~
 
 
-2. ansible-galaxy init
+#### ansible-galaxy init
 
 ~~~bash
 ➜  Deron-D_infra git:(ansible-3) ✗ pwd
@@ -3265,6 +3267,184 @@ db
 - [ansible/roles/app/tasks/main.yml](./ansible/roles/app/tasks/main.yml)
 - [ansible/roles/app/handlers/main.yml](./ansible/roles/app/handlers/main.yml)
 - [ansible/roles/app/defaults/main.yml](./ansible/roles/app/defaults/main.yml)
+
+Вызов ролей:
+~~~bash
+➜  stage git:(ansible-3) ✗ terrafrom destroy --auto-approve
+➜  stage git:(ansible-3) ✗ terraform apply --auto-approve
+...
+external_ip_address_app = 62.84.116.192
+external_ip_address_db = 51.250.1.189
+➜  stage git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+---------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+---------------+-------------+
+| fhm9lkc0tg6q4hon4a9p | reddit-db  | ru-central1-a | RUNNING | 51.250.1.189  | 10.128.0.31 |
+| fhmfh2vajkdocqp8sf8a | reddit-app | ru-central1-a | RUNNING | 62.84.116.192 | 10.128.0.20 |
++----------------------+------------+---------------+---------+---------------+-------------+
+~~~
+
+Удалим определение тасков и хендлеров в плейбуке ansible/app.yml и заменим на вызов роли:
+~~~yaml
+---
+- name: Configure App
+  hosts: app
+  become: true
+  vars:
+   db_host: 10.128.0.31
+roles:
+- app
+~~~
+
+Аналогичную операцию проделаем с файлом ansible/db.yml:
+~~~yaml
+---
+- name: Configure MongoDB
+  hosts: db
+  become: true
+  vars:
+    mongo_bind_ip: 0.0.0.0
+roles:
+- db
+~~~
+
+Проверим и запустим:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook site.yml --check
+
+PLAY [Configure MongoDB] ***************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [db : Change mongo config file] ***************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [db : restart mongod] **************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *******************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add unit file for Puma] ****************************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : Add config for DB connection] **********************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : enable puma] ***************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [app : reload puma] ****************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] **********************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *****************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] ************************************************************************************************
+skipping: [reddit-app]
+
+TASK [bundle install] ******************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *****************************************************************************************************************************************
+reddit-app                 : ok=8    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook site.yml
+
+PLAY [Configure MongoDB] ***************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [db : Change mongo config file] ***************************************************************************************************************
+ok: [reddit-db]
+
+PLAY [Configure App] *******************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add unit file for Puma] ****************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add config for DB connection] **********************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : enable puma] ***************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] **********************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *****************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] ************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ******************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] *********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *****************************************************************************************************************************************
+reddit-app                 : ok=9    changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+
+Проверим работу приложения
+~~~bash
+➜  ansible git:(ansible-3) ✗ curl http://62.84.116.192:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+### 2. Описываем два окружения
+
+Создадим директорию environments в директории ansible для определения настроек окружения. В директории `ansible/environments` создадим две директории для наших окружений `stage` и `prod`.
+Так как мы управляем разными хостами на разных окружениях, то нам необходим свой инвентори-файл для каждого из окружений. Скопируем инвентори файл `ansible/inventory` в каждую из директорий окружения `environtents/prod` и `environments/stage`. Сам файл `ansible/inventory` при этом удалим.
+
+Определим окружение по умолчанию в конфиге Ansible [(файл ansible/ansible.cfg)](./ansible/ansible.cfg):
+~~~ini
+[defaults]
+inventory = ./environments/stage/inventory # Inventory по-умолчанию задается здесь remote_user = appuser
+private_key_file = ~/.ssh/appuser
+host_key_checking = False
+~~~
+
+Переменные групп хостов
+Директория `group_vars`, созданная в директории плейбука или инвентори файла, позволяет создавать файлы (имена, которых должны соответствовать названиям групп в инвентори файле) для определения переменных для группы хостов.
+Создадим директорию `group_vars` в директориях наших окружений `environments/prod` и `environments/stage`.
+
+Создадим в директории `group_vars` файлы для хранения значений переменных для окружения `stage`:
+- [ansible/environments/stage/group_vars/all](./ansible/environments/stage/group_vars/all)
+- [ansible/environments/stage/group_vars/app](./ansible/environments/stage/group_vars/app)
+- [ansible/environments/stage/group_vars/db](./ansible/environments/stage/group_vars/db)
+
+Аналогично для окружения `prod`:
+- [ansible/environments/prod/group_vars/all](./ansible/environments/prod/group_vars/all)
+- [ansible/environments/prod/group_vars/app](./ansible/environments/prod/group_vars/app)
+- [ansible/environments/prod/group_vars/db](./ansible/environments/prod/group_vars/db)
 
 
 

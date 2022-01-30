@@ -8,8 +8,8 @@
 - name: Add config for DB connection
   template:
     src: db_config.j2
-    dest: /home/appuser/db_config
-    owner: appuser
-    group: appuser
+    dest: /home/ubuntu/db_config
+    owner: ubuntu
+    group: ubuntu
 - name: enable puma
   systemd: name=puma enabled=yes
