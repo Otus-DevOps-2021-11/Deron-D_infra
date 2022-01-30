@@ -2924,6 +2924,240 @@ reddit-app                 : ok=10   changed=8    unreachable=0    failed=0    s
 reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ~~~
 
+6. Провижининг в Packer
+
+Создадим плейбуки `ansible/packer_app.yml` и `ansible/packer_db.yml`.
+
+Каждый из них реализует функционал bash-скриптов,которые использовались в Packer ранее.
+- [packer_app.yml](./ansible/packer_app.yml) - устанавливает Ruby и Bundler
+- [packer_db.yml](./ansible/packer_db.yml) - добавляет репозиторий MongoDB, устанавливает ее и включает сервис.
+
+Интегрируем Ansible в Packer
+
+Заменим секцию Provision в образе 'packer/app.json' на Ansible:
+~~~json
+"provisioners": [
+    {
+        "type": "ansible",
+        "playbook_file": "ansible/packer_app.yml"
+    }
+]
+~~~
+
+Заменим секцию Provision в образе 'packer/db.json' на Ansible:
+~~~json
+"provisioners": [
+    {
+        "type": "ansible",
+        "playbook_file": "ansible/packer_db.yml"
+    }
+]
+~~~
+
+Выполним билд образов с использованием нового провижинера.
+~~~bash
+➜  Deron-D_infra git:(ansible-2) ✗ packer build -var-file=./packer/variables.json ./packer/app.json
+yandex: output will be in this color.
+
+==> yandex: Creating temporary ssh key for instance...
+==> yandex: Using as source image: fd8sm7r835rv9vcq3pnd (name: "ubuntu-16-04-lts-v20220124", family: "ubuntu-1604-lts")
+==> yandex: Creating network...
+==> yandex: Creating subnet in zone "ru-central1-a"...
+==> yandex: Creating disk...
+==> yandex: Creating instance...
+==> yandex: Waiting for instance with id fhmdnq7587bjsjerp5ue to become active...
+    yandex: Detected instance IP: 51.250.3.10
+==> yandex: Using SSH communicator to connect: 51.250.3.10
+==> yandex: Waiting for SSH to become available...
+==> yandex: Connected to SSH!
+==> yandex: Provisioning with Ansible...
+    yandex: Setting up proxy adapter for Ansible....
+==> yandex: Executing Ansible: ansible-playbook -e packer_build_name="yandex" -e packer_builder_type=yandex --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key3666147265 -i /tmp/packer-provisioner-ansible2404702792 /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/packer_app.yml
+    yandex:
+    yandex: PLAY [Install Ruby && Bundler] *************************************************
+    yandex:
+    yandex: TASK [Gathering Facts] *********************************************************
+    yandex: ok: [default]
+    yandex:
+    yandex: TASK [Install ruby and rubygems and required packages] *************************
+    yandex: changed: [default] => (item=ruby-full)
+    yandex: changed: [default] => (item=ruby-bundler)
+    yandex: changed: [default] => (item=build-essential)
+    yandex:
+    yandex: PLAY RECAP *********************************************************************
+    yandex: default                    : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+    yandex:
+==> yandex: Stopping instance...
+==> yandex: Deleting instance...
+    yandex: Instance has been deleted!
+==> yandex: Creating image: reddit-app-base
+==> yandex: Waiting for image to complete...
+==> yandex: Success image create...
+==> yandex: Destroying subnet...
+    yandex: Subnet has been deleted!
+==> yandex: Destroying network...
+    yandex: Network has been deleted!
+==> yandex: Destroying boot disk...
+    yandex: Disk has been deleted!
+Build 'yandex' finished after 3 minutes 43 seconds.
+
+==> Wait completed after 3 minutes 43 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> yandex: A disk image was created: reddit-app-base (id: fd85i3u2sn0vbc4fju93) with family name reddit-app-base
+➜  Deron-D_infra git:(ansible-2) ✗ packer build -var-file=./packer/variables.json ./packer/db.json
+yandex: output will be in this color.
+
+==> yandex: Creating temporary ssh key for instance...
+==> yandex: Using as source image: fd8sm7r835rv9vcq3pnd (name: "ubuntu-16-04-lts-v20220124", family: "ubuntu-1604-lts")
+==> yandex: Creating network...
+==> yandex: Creating subnet in zone "ru-central1-a"...
+==> yandex: Creating disk...
+==> yandex: Creating instance...
+==> yandex: Waiting for instance with id fhm7lm9ov8oi0jc7df8g to become active...
+    yandex: Detected instance IP: 51.250.7.51
+==> yandex: Using SSH communicator to connect: 51.250.7.51
+==> yandex: Waiting for SSH to become available...
+==> yandex: Connected to SSH!
+==> yandex: Provisioning with Ansible...
+    yandex: Setting up proxy adapter for Ansible....
+==> yandex: Executing Ansible: ansible-playbook -e packer_build_name="yandex" -e packer_builder_type=yandex --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key2187002955 -i /tmp/packer-provisioner-ansible3316747439 /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/packer_db.yml
+    yandex:
+    yandex: PLAY [Install MongoDB 4.2] *****************************************************
+    yandex:
+    yandex: TASK [Gathering Facts] *********************************************************
+    yandex: ok: [default]
+    yandex:
+    yandex: TASK [Add key] *****************************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Add APT repository] ******************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Install mongodb package] *************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Configure service supervisor] ********************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: PLAY RECAP *********************************************************************
+    yandex: default                    : ok=5    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+    yandex:
+==> yandex: Stopping instance...
+==> yandex: Deleting instance...
+    yandex: Instance has been deleted!
+==> yandex: Creating image: reddit-db-base
+==> yandex: Waiting for image to complete...
+==> yandex: Success image create...
+==> yandex: Destroying subnet...
+    yandex: Subnet has been deleted!
+==> yandex: Destroying network...
+    yandex: Network has been deleted!
+==> yandex: Destroying boot disk...
+    yandex: Disk has been deleted!
+Build 'yandex' finished after 4 minutes 3 seconds.
+
+==> Wait completed after 4 minutes 3 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> yandex: A disk image was created: reddit-db-base (id: fd80onpol3cjo50bgeba) with family name reddit-db-base
+➜  Deron-D_infra git:(ansible-2) ✗ yc compute image list
++----------------------+-----------------+-----------------+----------------------+--------+
+|          ID          |      NAME       |     FAMILY      |     PRODUCT IDS      | STATUS |
++----------------------+-----------------+-----------------+----------------------+--------+
+| fd80onpol3cjo50bgeba | reddit-db-base  | reddit-db-base  | f2eeuhi33ke5pafuvsf3 | READY  |
+| fd85i3u2sn0vbc4fju93 | reddit-app-base | reddit-app-base | f2eeuhi33ke5pafuvsf3 | READY  |
++----------------------+-----------------+-----------------+----------------------+--------+
+~~~
+
+На основе созданных `app` и `db` образов запустим `stage` окружение.
+Проверим, что c помощью плейбука `site.yml` из предыдущего раздела окружение конфигурируется, а приложение деплоится и работает.
+
+~~~bash
+➜  Deron-D_infra git:(ansible-2) ✗ cd terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm78l5vvqomhm3hl8qm]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhm18qjnavo9cl0560q3]
+
+Destroy complete! Resources: 0 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Creation complete after 43s [id=fhmh598eihgkqaache77]
+module.db.yandex_compute_instance.db: Creation complete after 44s [id=fhmanr142o6a876iig6n]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.233
+external_ip_address_db = 51.250.11.195
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml
+PLAY [Configure MongoDB] ******************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [dbserver]
+
+TASK [Change mongo config file] ***********************************************************************************************************
+changed: [dbserver]
+
+RUNNING HANDLER [restart mongod] **********************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] **********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [appserver]
+
+TASK [Add unit file for Puma] *************************************************************************************************************
+changed: [appserver]
+
+TASK [Add config for DB connection] *******************************************************************************************************
+changed: [appserver]
+
+TASK [enable puma] ************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [reload puma] *************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *************************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ********************************************************************************************************************
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***************************************************************************************
+changed: [appserver]
+
+TASK [bundle install] *********************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [restart puma] ************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ********************************************************************************************************************************
+appserver                  : ok=10   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+~~~
+
+
 # **Полезное:**
 
 </details>
