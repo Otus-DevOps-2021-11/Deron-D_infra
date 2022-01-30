@@ -3161,3 +3161,103 @@ dbserver                   : ok=3    changed=2    unreachable=0    failed=0    s
 # **Полезное:**
 
 </details>
+
+
+# **Лекция №12: Ansible роли, управление настройками нескольких окружений и best practices**
+> _ansible-3_
+<details>
+ <summary>Написание Ansible ролей для управления конфигурацией сервисов и настройками хостов.</summary>
+
+## **Задание:**
+Цель:
+В данном дз студент научится организовывать репозитории для работы с несколькими окружениями. Научится работать с Ansible Galaxy и комьюнити ролями.
+В данном задании тренируются навыки: работы с ansible, организации репозиториев, работы с Ansible Galaxy.
+
+Описание/Пошаговая инструкция выполнения домашнего задания:
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+### План
+- Переносим созданные плейбуки в раздельные роли
+- Описываем два окружения
+- Используем коммьюнити роль nginx
+- Используем Ansible Vault для наших окружений
+
+
+---
+
+## **Выполнено:**
+
+1. Ansible Galaxy
+
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ ansible-galaxy -h
+usage: ansible-galaxy [-h] [--version] [-v] TYPE ...
+
+Perform various Role and Collection related operations.
+
+positional arguments:
+  TYPE
+    collection   Manage an Ansible Galaxy collection.
+    role         Manage an Ansible Galaxy role.
+
+optional arguments:
+  --version      show program's version number, config file location,
+                 configured module search path, module location, executable
+                 location and exit
+  -h, --help     show this help message and exit
+  -v, --verbose  verbose mode (-vvv for more, -vvvv to enable connection
+                 debugging)
+~~~
+
+
+2. ansible-galaxy init
+
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ pwd
+/home/dpp/otus-devops-2021-11/Deron-D_infra
+➜  Deron-D_infra git:(ansible-3) ✗ mkdir -p ansible/roles
+➜  Deron-D_infra git:(ansible-3) ✗ cd ansible/roles
+➜  roles git:(ansible-3) ✗ ansible-galaxy init app
+- Role app was created successfully
+➜  roles git:(ansible-3) ✗ ansible-galaxy init db
+- Role db was created successfully
+~~~
+
+~~~bash
+➜  roles git:(ansible-3) ✗ tree db
+db
+├── defaults      # <-- Директория для переменных по умолчанию
+│   └── main.yml
+├── files
+├── handlers
+│   └── main.yml
+├── meta          # <-- Информация о роли, создателе и зависимостях
+│   └── main.yml
+├── README.md
+├── tasks         # <-- Директория для тасков
+│   └── main.yml
+├── templates
+├── tests
+│   ├── inventory
+│   └── test.yml
+└── vars          # <-- Директория для переменных, которые не должны
+    └── main.yml  #     переопределяться пользователем
+
+8 directories, 8 files
+~~~
+
+Создадим роль для конфигурации MongoDB:
+На основе плейбука [db.yml](./ansible/db.yml) создадим файлы
+- [ansible/roles/db/tasks/main.yml](./ansible/roles/db/tasks/main.yml)
+- [ansible/roles/db/handlers/main.yml](./ansible/roles/db/handlers/main.yml)
+- [ansible/roles/db/defaults/main.yml](./ansible/roles/db/defaults/main.yml)
+
+
+# **Полезное:**
+
+</details>
