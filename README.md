@@ -4088,7 +4088,74 @@ dbserver                   : ok=4    changed=2    unreachable=0    failed=0    s
 ...
 ~~~
 
-3. Используем коммьюнити роль nginx
+### 3. Используем коммьюнити роль nginx
+
+Используем роль `jdauphant.nginx` и настроим обратное проксирование для нашего приложения с помощью `nginx`.
+Хорошей практикой является разделение зависимостей ролей
+(requirements.yml) по окружениям.
+- Создадим файлы [environments/stage/requirements.yml](./ansible/environments/stage/requirements.yml) и [environments/prod/requirements.yml](./ansble/environments/prod/requirements.yml)
+- Добавим в них запись вида:
+~~~yaml
+- src: jdauphant.nginx
+  version: v2.21.1
+~~~
+
+- Установим роль:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-galaxy install -r environments/stage/requirements.yml
+- downloading role 'nginx', owned by jdauphant
+- downloading role from https://github.com/jdauphant/ansible-role-nginx/archive/v2.21.1.tar.gz
+- extracting jdauphant.nginx to /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/jdauphant.nginx
+- jdauphant.nginx (v2.21.1) was installed successfully
+~~~
+
+- Комьюнити-роли не стоит коммитить в свой репозиторий, для
+этого добавим в [.gitignore](.gitignore) запись: jdauphant.nginx
+
+Для минимальной настройки проксирования необходимо добавить следующие переменные:
+~~~yaml
+nginx_sites:
+  default:
+    - listen 80
+    - server_name "reddit"
+    - location / {
+        proxy_pass http://127.0.0.1:9292;
+      }
+~~~
+Добавим эти переменные в `stage/group_vars/app` и `prod/group_vars/app`
+
+Применим плейбук site.yml для окружения stage и проверим, что приложение теперь доступно на 80 порту:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+[WARNING]: While constructing a mapping from /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/jdauphant.nginx/tasks/configuration.yml,
+line 62, column 3, found a duplicate dict key (when). Using last defined value only.
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+...
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=28   changed=19   unreachable=0    failed=0    skipped=17   rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ curl 51.250.5.15
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+~~~
+
+
+### 4. Используем Ansible Vault для наших окружений
 
 # **Полезное:**
 
