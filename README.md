@@ -4220,42 +4220,12 @@ Encryption successful
 ~~~
 
 - Добавим вызов плейбука в файл site.yml и выполним его для stage окружения:
+
 ~~~bash
 ➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
 ...
 TASK [create users] *******************************************************************************************************************************
-changed: [appserver] => (item={'key': 'admin', 'value': {'password': '➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.5.15
-admin@51.250.5.15's password:
-Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
-
- * Documentation:  https://help.ubuntu.com
- * Management:     https://landscape.canonical.com
- * Support:        https://ubuntu.com/advantage
-
-The programs included with the Ubuntu system are free software;
-the exact distribution terms for each program are described in the
-individual files in /usr/share/doc/*/copyright.
-
-Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
-applicable law.
-
-$ exit
-Connection to 51.250.5.15 closed.
-➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.10.243
-admin@51.250.10.243's password:
-Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
-
- * Documentation:  https://help.ubuntu.com
- * Management:     https://landscape.canonical.com
- * Support:        https://ubuntu.com/advantage
-
-The programs included with the Ubuntu system are free software;
-the exact distribution terms for each program are described in the
-individual files in /usr/share/doc/*/copyright.
-
-Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
-applicable law.
-', 'groups': 'sudo'}})
+changed: [appserver] => (item={'key': 'admin', 'value': {'password': 'qwerty123', 'groups': 'sudo'}})
 changed: [dbserver] => (item={'key': 'admin', 'value': {'password': 'qwerty123', 'groups': 'sudo'}})
 changed: [appserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
 changed: [dbserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
@@ -4266,6 +4236,7 @@ dbserver                   : ok=5    changed=1    unreachable=0    failed=0    s
 ~~~
 
 - Проверяем:
+
 ~~~bash
 ➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.5.15
 admin@51.250.5.15's password:
