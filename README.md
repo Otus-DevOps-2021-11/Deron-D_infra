@@ -3158,13 +3158,91 @@ dbserver                   : ok=3    changed=2    unreachable=0    failed=0    s
 ~~~
 
 ### Задание со ⭐
+Настройка плагина для динамической инвентаризации в Yandex.Cloud
 
+Возьмем из [PR](https://github.com/ansible/ansible/pull/61722) код плагина и сохраним
+в файле [ansible/plugins/inventory/yc_compute.py](./ansible/plugins/inventory/yc_compute.py)
+
+Добавим в `requirements.txt` строки:
+~~~
+grpcio>=1.2.0
+yandexcloud>=0.10.1
+~~~
+
+Запустим установку зависимостей:
 ~~~bash
 python3 -m pip install virtualenv
 virtualenv venv
 source venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install grpcio
+python3 -m pip install --upgrade pip
+pip3 install -r requirements.txt
+~~~
+
+Создадим файл `yc_compute.yaml` с содержимым:
+~~~yaml
+plugin: yc_compute
+folders:  # List inventory hosts from these folders.
+  - 'b1gu87e4thvariradsue'
+filters:
+  - status == 'RUNNING'
+  #- labels['role'] == 'db'
+auth_kind: serviceaccountfile
+service_account_file: /home/dpp/.yc_keys/key.json
+hostnames:
+#  - fqdn  # Use FQDN for inventory hostnames.
+# You can also format hostnames with jinja2 epressions like this
+#  - "{{id}}_{{name}}"
+  - "{{name}}"
+compose:
+  # Set ansible_host to the Public IP address to connect to the host.
+  # For Private IP use "network_interfaces[0].primary_v4_address.address".
+  ansible_host: network_interfaces[0].primary_v4_address.one_to_one_nat.address
+
+keyed_groups:
+#   # Place hosts in groups named by folder_id.
+   # - key: folder_id
+   #   prefix: ''
+   #   separator: ''
+#   # Place hosts in groups named by value of labels['group'].
+  - key: labels['tags']
+    prefix: ''
+    separator: '-'
+~~~
+
+Проверим работу плагина:
+~~~bash
+(venv) ➜  ansible git:(ansible-2) ✗ ansible-inventory --list
+[DEPRECATION WARNING]: set_available_variables is being deprecated. Use "@available_variables.setter" instead.. This feature will be removed in version
+2.13. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+{
+    "_meta": {
+        "hostvars": {
+            "reddit-app": {
+                "ansible_host": "51.250.12.212"
+            },
+            "reddit-db": {
+                "ansible_host": "51.250.5.15"
+            }
+        }
+    },
+    "_reddit_app": {
+        "hosts": [
+            "reddit-app"
+        ]
+    },
+    "_reddit_db": {
+        "hosts": [
+            "reddit-db"
+        ]
+    },
+    "all": {
+        "children": [
+            "_reddit_app",
+            "_reddit_db",
+            "ungrouped"
+        ]
+    }
+}
 ~~~
 
 # **Полезное:**
