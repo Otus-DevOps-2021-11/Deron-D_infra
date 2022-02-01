@@ -2336,3 +2336,2014 @@ reddit-app | SUCCESS => {
 # **Полезное:**
 
 </details>
+
+# **Лекция №11: Продолжение знакомства с Ansible: templates, handlers, dynamic inventory, vault, tags**
+> _ansible-2_
+<details>
+ <summary>Управление настройками хостов и деплой приложения при помощи Ansible.</summary>
+
+## **Задание:**
+Цель:
+В данном дз студент продолжит знакомство с Ansible. Продолжит написание плейбуков для автоматизации конфигурирования серверов.
+В данном задании тренируются навыки: работы с Ansible, написания плейбуков, формирования инвентарей.
+
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+---
+
+## **Выполнено:**
+
+### План
+- Используем плейбуки, хендлеры и шаблоны для конфигурации окружения и деплоя тестового приложения. Подход один плейбук, один сценарий (play)
+- Аналогично один плейбук, но много сценариев
+- И много плейбуков.
+- Изменим провижн образов Packer на Ansible-плейбуки
+
+Т.к. был настроен провижн в ДЗ по Terraform, то выключаем его установкой  `enable_provision = false` в файле
+`terraform/stage/terraform.tfvars`
+Пересоздаем окружение stage и проверяем отсутствие провижионинга:
+
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible app -i inventory.sh  -m command -a 'systemctl status puma.service'
+reddit-app | FAILED | rc=3 >>
+● puma.service
+   Loaded: not-found (Reason: No such file or directory)
+   Active: inactive (dead)non-zero return code
+➜  ansible git:(ansible-2) ✗ ansible db -i inventory.sh  -m shell -a 'cat /etc/mongod.conf | grep -i bindip'
+reddit-db | CHANGED | rc=0 >>
+  bindIp: 127.0.0.1
+~~~
+
+1. Сценарий для MongoDB
+
+Используем модуль `template`, чтобы скопировать параметризированный локальный конфиг файл MongoDB на удаленный хост по указанному пути. Добавим task в файл `ansible/reddit_app.yml`:
+
+~~~yaml
+---
+- name: Configure hosts & deploy application
+  hosts: all
+  tasks:
+    - name: Change mongo config file
+      become: true  # <-- Выполнить задание от root
+      template:
+        src: templates/mongod.conf.j2  # <-- Путь до локального файла-шаблона
+        dest: /etc/mongod.conf  # <-- Путь на удаленном хосте
+        mode: 0644  # <-- Права на файл, которые нужно установить
+      tags: db-tag
+~~~
+
+Создадим шаблон конфига MongoDB `templates/mongod.conf.j2`
+~~~j2
+# Where and how to store data.
+storage:
+  dbPath: /var/lib/mongodb
+  journal:
+    enabled: true
+
+# where to write logging data.
+systemLog:
+  destination: file
+  logAppend: true
+  path: /var/log/mongodb/mongod.log
+
+# network interfaces
+net:
+  port: {{ mongo_port | default('27017') }}
+  bindIp: {{ mongo_bind_ip }}
+~~~
+
+Пробный прогон
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit db
+
+PLAY [Configure hosts & deploy application] ***********************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] ***********************************************************************************************************************
+fatal: [reddit-db]: FAILED! => {"changed": false, "msg": "AnsibleUndefinedVariable: 'mongo_bind_ip' is undefined"}
+
+PLAY RECAP ********************************************************************************************************************************************
+reddit-db                  : ok=1    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+~~~
+
+Определим в недостающую `reddit_app.yml` переменную `mongo_bind_ip: 0.0.0.0` для шаблона `templates/mongod.conf.j2` и повторим проверку плейбука:
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit db
+
+PLAY [Configure hosts & deploy application] ************************************************************************************************************
+
+TASK [Gathering Facts] *********************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] ************************************************************************************************************************
+changed: [reddit-db]
+
+PLAY RECAP *********************************************************************************************************************************************
+reddit-db                  : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Добавим handlers в файл `ansible/reddit_app.yml`, проверим плейбук и применим:
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit db
+
+PLAY [Configure hosts & deploy application] ************************************************************************************************************
+
+TASK [Gathering Facts] *********************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] ************************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] ***********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY RECAP *********************************************************************************************************************************************
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --limit db
+
+PLAY [Configure hosts & deploy application] ************************************************************************************************************
+
+TASK [Gathering Facts] *********************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] ************************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] ***********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY RECAP *********************************************************************************************************************************************
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+2. Настройка инстанса приложения
+
+Создадим директорию files внутри директории ansible и добавим туда файл [puma.service](./files/puma.service).
+
+Добавим в наш сценарий таск для копирования unit-файла на хост приложения. Для копирования простого файла на удаленный хост, используем модуль `copy`, а для настройки автостарта Puma-сервера используем модуль `systemd`.
+~~~yaml
+tasks:
+  - name: Change mongo config file
+...
+  - name: Add unit file for Puma
+    become: true
+    copy:
+      src: files/puma.service
+      dest: /etc/systemd/system/puma.service
+    tags: app-tag
+    notify: reload puma
+  - name: enable puma
+    become: true
+    systemd: name=puma enabled=yes
+    tags: app-tag
+~~~
+
+Не забудем добавить новый handler, который укажет systemd, что unit для сервиса изменился и его следует перечитать:
+
+~~~yaml
+handlers:
+  - name: restart mongod
+    become: true
+    service: name=mongod state=restarted
+  - name: reload puma
+    become: true
+    systemd: name=puma state=restarted
+~~~
+
+Так же, unit-файл для вебсервера изменился.
+В него добавилась строка чтения переменных окружения из файла:
+Через переменную окружения мы будем передавать адрес инстанса БД, чтобы приложение знало, куда ему обращаться для хранения данных.
+
+~~~yaml
+EnvironmentFile=/home/appuser/db_config
+~~~
+
+Создадим шаблон в директории `templates/db_config.j2` куда добавим следующую строку:
+~~~yaml
+DATABASE_URL={{ db_host }}
+~~~
+
+Как видим, данный шаблон содержит присвоение переменной `DATABASE_URL` значения, которое мы передаем через Ansible переменную `db_host`.
+
+Добавим таск для копирования созданного шаблона:
+
+~~~yaml
+- name: Add unit file for Puma
+...
+- name: Add config for DB connection
+  template:
+    src: templates/db_config.j2
+    dest: /home/appuser/db_config
+  tags: app-tag
+- name: enable puma
+  become: true
+  systemd: name=puma enabled=yes
+  tags: app-tag
+~~~
+
+Уточним значение внутреннего IP-адреса инстанса базы данных и присвоим его переменной `db_host`.
+~~~bash
+ansible git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm0ovicvvgqijaa714j | reddit-db  | ru-central1-a | RUNNING | 51.250.7.51  | 10.128.0.31 |
+| fhmaglhid4arfp0n627m | reddit-app | ru-central1-a | RUNNING | 51.250.6.184 | 10.128.0.30 |
++----------------------+------------+---------------+---------+--------------+-------------+
+~~~
+
+~~~yaml
+---
+- name: Configure hosts & deploy application
+  hosts: all
+  vars:
+    mongo_bind_ip: 0.0.0.0
+    db_host: 10.128.0.31  # <-- подставьте сюда ваш INTERNAL IP reddit-db
+  tasks:
+...
+~~~
+
+Пробный прогон:
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit app --tags app-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Применим наши таски плейбука с тегом `app-tag` для группы хостов `app`
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --limit app --tags app-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+3. Деплой
+
+Добавим еще несколько тасков в сценарий нашего плейбука.
+Используем модули `git` и `bundle` для клонирования последней версии кода нашего приложения и установки зависимых Ruby Gems через
+`bundle`.
+
+Выполняем деплой
+~~~bash
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --check --limit app --tags deploy-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the git] *********************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [Bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app.yml --limit app --tags deploy-tag
+
+PLAY [Configure hosts & deploy application] **********************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the git] *********************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [Bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=5    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Проверяем работу приложения:
+
+![screen](./ansible/screens/screen1.png)
+
+4. Напишем плейбук reddit_app2.yml, в котором определим в нем несколько сценариев (plays), в которые объединим задачи, относящиеся к используемым в плейбуке тегам.
+
+~~~bash
+➜  ansible git:(ansible-2) ✗ cd ../terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhms89o48s8i7ogvtdql]
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhmkslgklc0mkc2s2073]
+module.db.yandex_compute_instance.db: Destroying... [id=fhmkslgklc0mkc2s2073]
+module.app.yandex_compute_instance.app: Destroying... [id=fhms89o48s8i7ogvtdql]
+module.db.yandex_compute_instance.db: Destruction complete after 10s
+module.app.yandex_compute_instance.app: Destruction complete after 10s
+
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Creation complete after 41s [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Creation complete after 41s [id=fhmoe56h7o37v4ppub97]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.3.193
+external_ip_address_db = 51.250.2.247
+➜  stage git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm6iidft5e8gvclqker | reddit-db  | ru-central1-a | RUNNING | 51.250.2.247 | 10.128.0.31 |
+| fhmoe56h7o37v4ppub97 | reddit-app | ru-central1-a | RUNNING | 51.250.3.193 | 10.128.0.7  |
++----------------------+------------+---------------+---------+--------------+-------------+
+
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ ansible-playbook reddit_app2.yml
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+ok: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+ok: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] ***********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=9    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+5. Несколько плейбуков
+В директории ansible создадим 4 новых файла:
+
+- `app.yml`
+- `db.yml`
+- `deploy.yml`
+- `site.yml`
+
+Заодно переименуем наши предыдущие плейбуки:
+
+- `reddit_app.yml`  -> `reddit_app_one_play.yml`
+- `reddit_app2.yml` -> `reddit_app_multiple_plays.yml`
+
+Проверим и запустим созданную конфигурацию плейбуков:
+
+~~~bash
+➜  ansible git:(ansible-2) ✗ cd ../terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve=true
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmoe56h7o37v4ppub97]
+module.db.yandex_compute_instance.db: Destroying... [id=fhm6iidft5e8gvclqker]
+module.app.yandex_compute_instance.app: Destroying... [id=fhmoe56h7o37v4ppub97]
+module.app.yandex_compute_instance.app: Destruction complete after 10s
+module.db.yandex_compute_instance.db: Destruction complete after 10s
+
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve=true
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Creation complete after 41s [id=fhm18qjnavo9cl0560q3]
+module.db.yandex_compute_instance.db: Creation complete after 47s [id=fhm78l5vvqomhm3hl8qm]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.2.247
+external_ip_address_db = 51.250.13.68
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ yc compute instance list
++----------------------+------------+---------------+---------+--------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  | EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+--------------+-------------+
+| fhm18qjnavo9cl0560q3 | reddit-app | ru-central1-a | RUNNING | 51.250.2.247 | 10.128.0.3  |
+| fhm78l5vvqomhm3hl8qm | reddit-db  | ru-central1-a | RUNNING | 51.250.13.68 | 10.128.0.34 |
++----------------------+------------+---------------+---------+--------------+-------------+
+
+➜  ansible git:(ansible-2) ✗
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml --check
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] *********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+fatal: [reddit-app]: FAILED! => {"changed": false, "msg": "Failed to find required executable git in paths: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"}
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=7    changed=5    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml
+
+PLAY [Configure MongoDB] *****************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [Change mongo config file] **********************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [restart mongod] *********************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Add unit file for Puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Add config for DB connection] ******************************************************************************************************************
+changed: [reddit-app]
+
+TASK [enable puma] ***********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [reload puma] ************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] ************************************************************************************************************************************
+
+TASK [Gathering Facts] *******************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *******************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] **************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ********************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] ***********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *******************************************************************************************************************************************
+reddit-app                 : ok=10   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+6. Провижининг в Packer
+
+Создадим плейбуки `ansible/packer_app.yml` и `ansible/packer_db.yml`.
+
+Каждый из них реализует функционал bash-скриптов,которые использовались в Packer ранее.
+- [packer_app.yml](./ansible/packer_app.yml) - устанавливает Ruby и Bundler
+- [packer_db.yml](./ansible/packer_db.yml) - добавляет репозиторий MongoDB, устанавливает ее и включает сервис.
+
+Интегрируем Ansible в Packer
+
+Заменим секцию Provision в образе 'packer/app.json' на Ansible:
+~~~json
+"provisioners": [
+    {
+        "type": "ansible",
+        "playbook_file": "ansible/packer_app.yml"
+    }
+]
+~~~
+
+Заменим секцию Provision в образе 'packer/db.json' на Ansible:
+~~~json
+"provisioners": [
+    {
+        "type": "ansible",
+        "playbook_file": "ansible/packer_db.yml"
+    }
+]
+~~~
+
+Выполним билд образов с использованием нового провижинера.
+~~~bash
+➜  Deron-D_infra git:(ansible-2) ✗ packer build -var-file=./packer/variables.json ./packer/app.json
+yandex: output will be in this color.
+
+==> yandex: Creating temporary ssh key for instance...
+==> yandex: Using as source image: fd8sm7r835rv9vcq3pnd (name: "ubuntu-16-04-lts-v20220124", family: "ubuntu-1604-lts")
+==> yandex: Creating network...
+==> yandex: Creating subnet in zone "ru-central1-a"...
+==> yandex: Creating disk...
+==> yandex: Creating instance...
+==> yandex: Waiting for instance with id fhmdnq7587bjsjerp5ue to become active...
+    yandex: Detected instance IP: 51.250.3.10
+==> yandex: Using SSH communicator to connect: 51.250.3.10
+==> yandex: Waiting for SSH to become available...
+==> yandex: Connected to SSH!
+==> yandex: Provisioning with Ansible...
+    yandex: Setting up proxy adapter for Ansible....
+==> yandex: Executing Ansible: ansible-playbook -e packer_build_name="yandex" -e packer_builder_type=yandex --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key3666147265 -i /tmp/packer-provisioner-ansible2404702792 /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/packer_app.yml
+    yandex:
+    yandex: PLAY [Install Ruby && Bundler] *************************************************
+    yandex:
+    yandex: TASK [Gathering Facts] *********************************************************
+    yandex: ok: [default]
+    yandex:
+    yandex: TASK [Install ruby and rubygems and required packages] *************************
+    yandex: changed: [default] => (item=ruby-full)
+    yandex: changed: [default] => (item=ruby-bundler)
+    yandex: changed: [default] => (item=build-essential)
+    yandex:
+    yandex: PLAY RECAP *********************************************************************
+    yandex: default                    : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+    yandex:
+==> yandex: Stopping instance...
+==> yandex: Deleting instance...
+    yandex: Instance has been deleted!
+==> yandex: Creating image: reddit-app-base
+==> yandex: Waiting for image to complete...
+==> yandex: Success image create...
+==> yandex: Destroying subnet...
+    yandex: Subnet has been deleted!
+==> yandex: Destroying network...
+    yandex: Network has been deleted!
+==> yandex: Destroying boot disk...
+    yandex: Disk has been deleted!
+Build 'yandex' finished after 3 minutes 43 seconds.
+
+==> Wait completed after 3 minutes 43 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> yandex: A disk image was created: reddit-app-base (id: fd85i3u2sn0vbc4fju93) with family name reddit-app-base
+➜  Deron-D_infra git:(ansible-2) ✗ packer build -var-file=./packer/variables.json ./packer/db.json
+yandex: output will be in this color.
+
+==> yandex: Creating temporary ssh key for instance...
+==> yandex: Using as source image: fd8sm7r835rv9vcq3pnd (name: "ubuntu-16-04-lts-v20220124", family: "ubuntu-1604-lts")
+==> yandex: Creating network...
+==> yandex: Creating subnet in zone "ru-central1-a"...
+==> yandex: Creating disk...
+==> yandex: Creating instance...
+==> yandex: Waiting for instance with id fhm7lm9ov8oi0jc7df8g to become active...
+    yandex: Detected instance IP: 51.250.7.51
+==> yandex: Using SSH communicator to connect: 51.250.7.51
+==> yandex: Waiting for SSH to become available...
+==> yandex: Connected to SSH!
+==> yandex: Provisioning with Ansible...
+    yandex: Setting up proxy adapter for Ansible....
+==> yandex: Executing Ansible: ansible-playbook -e packer_build_name="yandex" -e packer_builder_type=yandex --ssh-extra-args '-o IdentitiesOnly=yes' -e ansible_ssh_private_key_file=/tmp/ansible-key2187002955 -i /tmp/packer-provisioner-ansible3316747439 /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/packer_db.yml
+    yandex:
+    yandex: PLAY [Install MongoDB 4.2] *****************************************************
+    yandex:
+    yandex: TASK [Gathering Facts] *********************************************************
+    yandex: ok: [default]
+    yandex:
+    yandex: TASK [Add key] *****************************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Add APT repository] ******************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Install mongodb package] *************************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: TASK [Configure service supervisor] ********************************************
+    yandex: changed: [default]
+    yandex:
+    yandex: PLAY RECAP *********************************************************************
+    yandex: default                    : ok=5    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+    yandex:
+==> yandex: Stopping instance...
+==> yandex: Deleting instance...
+    yandex: Instance has been deleted!
+==> yandex: Creating image: reddit-db-base
+==> yandex: Waiting for image to complete...
+==> yandex: Success image create...
+==> yandex: Destroying subnet...
+    yandex: Subnet has been deleted!
+==> yandex: Destroying network...
+    yandex: Network has been deleted!
+==> yandex: Destroying boot disk...
+    yandex: Disk has been deleted!
+Build 'yandex' finished after 4 minutes 3 seconds.
+
+==> Wait completed after 4 minutes 3 seconds
+
+==> Builds finished. The artifacts of successful builds are:
+--> yandex: A disk image was created: reddit-db-base (id: fd80onpol3cjo50bgeba) with family name reddit-db-base
+➜  Deron-D_infra git:(ansible-2) ✗ yc compute image list
++----------------------+-----------------+-----------------+----------------------+--------+
+|          ID          |      NAME       |     FAMILY      |     PRODUCT IDS      | STATUS |
++----------------------+-----------------+-----------------+----------------------+--------+
+| fd80onpol3cjo50bgeba | reddit-db-base  | reddit-db-base  | f2eeuhi33ke5pafuvsf3 | READY  |
+| fd85i3u2sn0vbc4fju93 | reddit-app-base | reddit-app-base | f2eeuhi33ke5pafuvsf3 | READY  |
++----------------------+-----------------+-----------------+----------------------+--------+
+~~~
+
+На основе созданных `app` и `db` образов запустим `stage` окружение.
+Проверим, что c помощью плейбука `site.yml` из предыдущего раздела окружение конфигурируется, а приложение деплоится и работает.
+
+~~~bash
+➜  Deron-D_infra git:(ansible-2) ✗ cd terraform/stage
+➜  stage git:(ansible-2) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm78l5vvqomhm3hl8qm]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhm18qjnavo9cl0560q3]
+
+Destroy complete! Resources: 0 destroyed.
+➜  stage git:(ansible-2) ✗ terraform apply --auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Creating...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Creation complete after 43s [id=fhmh598eihgkqaache77]
+module.db.yandex_compute_instance.db: Creation complete after 44s [id=fhmanr142o6a876iig6n]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 51.250.11.233
+external_ip_address_db = 51.250.11.195
+➜  stage git:(ansible-2) ✗ cd ../../ansible
+➜  ansible git:(ansible-2) ✗ ansible-playbook site.yml
+PLAY [Configure MongoDB] ******************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [dbserver]
+
+TASK [Change mongo config file] ***********************************************************************************************************
+changed: [dbserver]
+
+RUNNING HANDLER [restart mongod] **********************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] **********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [appserver]
+
+TASK [Add unit file for Puma] *************************************************************************************************************
+changed: [appserver]
+
+TASK [Add config for DB connection] *******************************************************************************************************
+changed: [appserver]
+
+TASK [enable puma] ************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [reload puma] *************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *************************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ********************************************************************************************************************
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***************************************************************************************
+changed: [appserver]
+
+TASK [bundle install] *********************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [restart puma] ************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ********************************************************************************************************************************
+appserver                  : ok=10   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+~~~
+
+### Задание со ⭐
+Настройка плагина для динамической инвентаризации в Yandex.Cloud
+
+Возьмем из [PR](https://github.com/ansible/ansible/pull/61722) код плагина и сохраним
+в файле [ansible/plugins/inventory/yc_compute.py](./ansible/plugins/inventory/yc_compute.py)
+
+Добавим в `requirements.txt` строки:
+~~~
+grpcio>=1.2.0
+yandexcloud>=0.10.1
+~~~
+
+Запустим установку зависимостей:
+~~~bash
+python3 -m pip install virtualenv
+virtualenv venv
+source venv/bin/activate
+python3 -m pip install --upgrade pip
+pip3 install -r requirements.txt
+~~~
+
+Создадим файл `yc_compute.yaml` с содержимым:
+~~~yaml
+plugin: yc_compute
+folders:  # List inventory hosts from these folders.
+  - 'b1gu87e4thvariradsue'
+filters:
+  - status == 'RUNNING'
+  #- labels['role'] == 'db'
+auth_kind: serviceaccountfile
+service_account_file: /home/dpp/.yc_keys/key.json
+hostnames:
+#  - fqdn  # Use FQDN for inventory hostnames.
+# You can also format hostnames with jinja2 epressions like this
+#  - "{{id}}_{{name}}"
+  - "{{name}}"
+compose:
+  # Set ansible_host to the Public IP address to connect to the host.
+  # For Private IP use "network_interfaces[0].primary_v4_address.address".
+  ansible_host: network_interfaces[0].primary_v4_address.one_to_one_nat.address
+
+keyed_groups:
+#   # Place hosts in groups named by folder_id.
+   # - key: folder_id
+   #   prefix: ''
+   #   separator: ''
+#   # Place hosts in groups named by value of labels['group'].
+  - key: labels['tags']
+    prefix: ''
+    separator: '-'
+~~~
+
+Проверим работу плагина:
+~~~bash
+(venv) ➜  ansible git:(ansible-2) ✗ ansible-inventory --list
+[DEPRECATION WARNING]: set_available_variables is being deprecated. Use "@available_variables.setter" instead.. This feature will be removed in version
+2.13. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+{
+    "_meta": {
+        "hostvars": {
+            "reddit-app": {
+                "ansible_host": "51.250.12.212"
+            },
+            "reddit-db": {
+                "ansible_host": "51.250.5.15"
+            }
+        }
+    },
+    "_reddit_app": {
+        "hosts": [
+            "reddit-app"
+        ]
+    },
+    "_reddit_db": {
+        "hosts": [
+            "reddit-db"
+        ]
+    },
+    "all": {
+        "children": [
+            "_reddit_app",
+            "_reddit_db",
+            "ungrouped"
+        ]
+    }
+}
+~~~
+
+# **Полезное:**
+
+</details>
+
+
+# **Лекция №12: Ansible роли, управление настройками нескольких окружений и best practices**
+> _ansible-3_
+<details>
+ <summary>Написание Ansible ролей для управления конфигурацией сервисов и настройками хостов.</summary>
+
+## **Задание:**
+Цель:
+В данном дз студент научится организовывать репозитории для работы с несколькими окружениями. Научится работать с Ansible Galaxy и комьюнити ролями.
+В данном задании тренируются навыки: работы с ansible, организации репозиториев, работы с Ansible Galaxy.
+
+Описание/Пошаговая инструкция выполнения домашнего задания:
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+### План
+- Переносим созданные плейбуки в раздельные роли
+- Описываем два окружения
+- Используем коммьюнити роль nginx
+- Используем Ansible Vault для наших окружений
+
+
+---
+
+## **Выполнено:**
+
+### 1. Переносим созданные плейбуки в раздельные роли
+
+#### Ansible Galaxy
+
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ ansible-galaxy -h
+usage: ansible-galaxy [-h] [--version] [-v] TYPE ...
+
+Perform various Role and Collection related operations.
+
+positional arguments:
+  TYPE
+    collection   Manage an Ansible Galaxy collection.
+    role         Manage an Ansible Galaxy role.
+
+optional arguments:
+  --version      show program's version number, config file location,
+                 configured module search path, module location, executable
+                 location and exit
+  -h, --help     show this help message and exit
+  -v, --verbose  verbose mode (-vvv for more, -vvvv to enable connection
+                 debugging)
+~~~
+
+
+#### ansible-galaxy init
+
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ pwd
+/home/dpp/otus-devops-2021-11/Deron-D_infra
+➜  Deron-D_infra git:(ansible-3) ✗ mkdir -p ansible/roles
+➜  Deron-D_infra git:(ansible-3) ✗ cd ansible/roles
+➜  roles git:(ansible-3) ✗ ansible-galaxy init app
+- Role app was created successfully
+➜  roles git:(ansible-3) ✗ ansible-galaxy init db
+- Role db was created successfully
+~~~
+
+~~~bash
+➜  roles git:(ansible-3) ✗ tree db
+db
+├── defaults      # <-- Директория для переменных по умолчанию
+│   └── main.yml
+├── files
+├── handlers
+│   └── main.yml
+├── meta          # <-- Информация о роли, создателе и зависимостях
+│   └── main.yml
+├── README.md
+├── tasks         # <-- Директория для тасков
+│   └── main.yml
+├── templates
+├── tests
+│   ├── inventory
+│   └── test.yml
+└── vars          # <-- Директория для переменных, которые не должны
+    └── main.yml  #     переопределяться пользователем
+
+8 directories, 8 files
+~~~
+
+Создадим роль для конфигурации MongoDB.
+На основе плейбука [db.yml](./ansible/db.yml) создадим файлы:
+- [ansible/roles/db/tasks/main.yml](./ansible/roles/db/tasks/main.yml)
+- [ansible/roles/db/handlers/main.yml](./ansible/roles/db/handlers/main.yml)
+- [ansible/roles/db/defaults/main.yml](./ansible/roles/db/defaults/main.yml)
+
+В директорию шаблонов роли `ansble/roles/db/templates` скопируем шаблонизированный конфиг для MongoDB из директории `ansible/templates`.
+
+
+Создадим роль для управления конфигурацией инстансаприложения.
+На основе плейбука [app.yml](./ansible/app.yml) создадим файлы:
+- [ansible/roles/app/tasks/main.yml](./ansible/roles/app/tasks/main.yml)
+- [ansible/roles/app/handlers/main.yml](./ansible/roles/app/handlers/main.yml)
+- [ansible/roles/app/defaults/main.yml](./ansible/roles/app/defaults/main.yml)
+
+Вызов ролей:
+~~~bash
+➜  stage git:(ansible-3) ✗ terrafrom destroy --auto-approve
+➜  stage git:(ansible-3) ✗ terraform apply --auto-approve
+...
+external_ip_address_app = 62.84.116.192
+external_ip_address_db = 51.250.1.189
+➜  stage git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+---------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP  | INTERNAL IP |
++----------------------+------------+---------------+---------+---------------+-------------+
+| fhm9lkc0tg6q4hon4a9p | reddit-db  | ru-central1-a | RUNNING | 51.250.1.189  | 10.128.0.31 |
+| fhmfh2vajkdocqp8sf8a | reddit-app | ru-central1-a | RUNNING | 62.84.116.192 | 10.128.0.20 |
++----------------------+------------+---------------+---------+---------------+-------------+
+~~~
+
+Удалим определение тасков и хендлеров в плейбуке ansible/app.yml и заменим на вызов роли:
+~~~yaml
+---
+- name: Configure App
+  hosts: app
+  become: true
+  vars:
+   db_host: 10.128.0.31
+roles:
+- app
+~~~
+
+Аналогичную операцию проделаем с файлом ansible/db.yml:
+~~~yaml
+---
+- name: Configure MongoDB
+  hosts: db
+  become: true
+  vars:
+    mongo_bind_ip: 0.0.0.0
+roles:
+- db
+~~~
+
+Проверим и запустим:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook site.yml --check
+
+PLAY [Configure MongoDB] ***************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [db : Change mongo config file] ***************************************************************************************************************
+changed: [reddit-db]
+
+RUNNING HANDLER [db : restart mongod] **************************************************************************************************************
+changed: [reddit-db]
+
+PLAY [Configure App] *******************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add unit file for Puma] ****************************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : Add config for DB connection] **********************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : enable puma] ***************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [app : reload puma] ****************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] **********************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *****************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] ************************************************************************************************
+skipping: [reddit-app]
+
+TASK [bundle install] ******************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *****************************************************************************************************************************************
+reddit-app                 : ok=8    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+reddit-db                  : ok=3    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook site.yml
+
+PLAY [Configure MongoDB] ***************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-db]
+
+TASK [db : Change mongo config file] ***************************************************************************************************************
+ok: [reddit-db]
+
+PLAY [Configure App] *******************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add unit file for Puma] ****************************************************************************************************************
+ok: [reddit-app]
+
+TASK [app : Add config for DB connection] **********************************************************************************************************
+changed: [reddit-app]
+
+TASK [app : enable puma] ***************************************************************************************************************************
+changed: [reddit-app]
+
+PLAY [Deploy App] **********************************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************************************
+ok: [reddit-app]
+
+TASK [Install the git] *****************************************************************************************************************************
+changed: [reddit-app]
+
+TASK [Fetch the latest version of application code] ************************************************************************************************
+changed: [reddit-app]
+
+TASK [bundle install] ******************************************************************************************************************************
+changed: [reddit-app]
+
+RUNNING HANDLER [restart puma] *********************************************************************************************************************
+changed: [reddit-app]
+
+PLAY RECAP *****************************************************************************************************************************************
+reddit-app                 : ok=9    changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+reddit-db                  : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+
+Проверим работу приложения
+~~~bash
+➜  ansible git:(ansible-3) ✗ curl http://62.84.116.192:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+### 2. Описываем два окружения
+
+Создадим директорию environments в директории ansible для определения настроек окружения. В директории `ansible/environments` создадим две директории для наших окружений `stage` и `prod`.
+Так как мы управляем разными хостами на разных окружениях, то нам необходим свой инвентори-файл для каждого из окружений. Скопируем инвентори файл `ansible/inventory` в каждую из директорий окружения `environtents/prod` и `environments/stage`. Сам файл `ansible/inventory` при этом удалим.
+
+Определим окружение по умолчанию в конфиге Ansible [(файл ansible/ansible.cfg)](./ansible/ansible.cfg):
+~~~ini
+[defaults]
+inventory = ./environments/stage/inventory # Inventory по-умолчанию задается здесь remote_user = appuser
+private_key_file = ~/.ssh/appuser
+host_key_checking = False
+~~~
+
+Переменные групп хостов
+
+Директория `group_vars`, созданная в директории плейбука или инвентори файла, позволяет создавать файлы (имена, которых должны соответствовать названиям групп в инвентори файле) для определения переменных для группы хостов.
+
+Создадим директорию `group_vars` в директориях наших окружений `environments/prod` и `environments/stage`.
+
+Создадим в директории `group_vars` файлы для хранения значений переменных для окружения `stage`:
+- [ansible/environments/stage/group_vars/all](./ansible/environments/stage/group_vars/all)
+- [ansible/environments/stage/group_vars/app](./ansible/environments/stage/group_vars/app)
+- [ansible/environments/stage/group_vars/db](./ansible/environments/stage/group_vars/db)
+
+Аналогично для окружения `prod`:
+- [ansible/environments/prod/group_vars/all](./ansible/environments/prod/group_vars/all)
+- [ansible/environments/prod/group_vars/app](./ansible/environments/prod/group_vars/app)
+- [ansible/environments/prod/group_vars/db](./ansible/environments/prod/group_vars/db)
+
+Для хостов из каждого окружения мы определили переменную
+env, которая содержит название окружения.
+Теперь настроим вывод информации об окружении, с которым
+мы работаем, при применении плейбуков.
+Определим переменную по умолчанию env в используемых ролях.
+
+Для роли app в файле [ansible/roles/app/defaults/main.yml](./ansible/roles/app/defaults/main.yml):
+~~~yaml
+# defaults file for app
+db_host: 127.0.0.1
+env: local
+~~~
+
+Для роли db в файле [ansible/roles/db/defaults/main.yml](./ansible/roles/db/defaults/main.yml):
+~~~yaml
+# defaults file for db
+mongo_port: 27017
+mongo_bind_ip: 127.0.0.1
+env: local
+~~~
+
+Будем выводить информацию о том, в каком окружении находится конфигурируемый хост. Воспользуемся модулем debug для вывода значения переменной. Добавим следующий таск в начало наших ролей.
+Для роли app [(файл ansible/roles/app/tasks/main.yml)](./ansible/roles/app/tasks/main.yml):
+
+~~~yaml
+# tasks file for app
+- name: Show info about the env this host belongs to
+  debug:
+    msg: "This host is in {{ env }} environment!!!"
+~~~
+
+Добавим такой же таск в роль db [(файл ansible/roles/db/tasks/main.yml)](./ansible/roles/db/tasks/main.yml):
+~~~yaml
+# tasks file for db
+- name: Show info about the env this host belongs to
+  debug: msg="This host is in {{ env }} environment!!!"
+~~~
+
+Организуем плейбуки
+Создадим директорию ansible/playbooks и перенесем туда все наши плейбуки, в том числе из прошлого ДЗ.
+В директории ansible у нас остались еще файлы из прошлых ДЗ, которые нам не особо нужны. Создадим директорию ansible/old и перенесем туда все, что не относится к текущей конфигурации.
+
+~~~bash
+➜  ansible git:(ansible-3) ✗ tree -L 3
+.
+├── ansible.cfg
+├── environments
+│   ├── prod
+│   │   ├── group_vars
+│   │   └── inventory
+│   └── stage
+│       ├── group_vars
+│       └── inventory
+├── old
+│   ├── files
+│   │   └── puma.service
+│   ├── inventory.json
+│   ├── inventory.sh
+│   ├── inventory.yml
+│   └── templates
+│       ├── db_config.j2
+│       └── mongod.conf.j2
+├── playbooks
+│   ├── app.yml
+│   ├── clone.yml
+│   ├── db.yml
+│   ├── deploy.yml
+│   ├── packer_app.yml
+│   ├── packer_db.yml
+│   ├── reddit_app_multiple_plays.yml
+│   ├── reddit_app_one_play.yml
+│   └── site.yml
+├── plugins
+│   └── inventory
+├── requirements.txt
+├── roles
+│   ├── app
+│   │   ├── defaults
+│   │   ├── files
+│   │   ├── handlers
+│   │   ├── meta
+│   │   ├── README.md
+│   │   ├── tasks
+│   │   ├── templates
+│   │   ├── tests
+│   │   └── vars
+│   └── db
+│       ├── defaults
+│       ├── files
+│       ├── handlers
+│       ├── meta
+│       ├── README.md
+│       ├── tasks
+│       ├── templates
+│       ├── tests
+│       └── vars
+└── screens
+    └── screen1.png
+~~~
+
+
+Улучшим файл ansible.cfg
+Заодно улучшим наш ansible.cfg. Для этого приведем его к такому виду:
+~~~ini
+[defaults]
+inventory = ./environments/stage/inventory
+remote_user = ubuntu
+private_key_file = ~/.ssh/ubuntu
+# Отключим проверку SSH Host-keys (поскольку они всегда разные для новых инстансов)
+host_key_checking = False
+# Отключим создание *.retry-файлов (они нечасто нужны, но мешаются под руками)
+retry_files_enabled = False
+# # Явно укажем расположение ролей (можно задать несколько путей через ; )
+roles_path = ./roles
+
+[diff]
+# Включим обязательный вывод diff при наличии изменений и вывод 5 строк контекста
+always = True
+context = 5
+~~~
+
+Проверка работы с окружениями
+~~~bash
+➜  stage git:(ansible-3) ✗ terraform destroy --auto-approve
+data.yandex_compute_image.app_image: Refreshing state...
+data.yandex_compute_image.db_image: Refreshing state...
+module.db.yandex_compute_instance.db: Refreshing state... [id=fhm9lkc0tg6q4hon4a9p]
+module.app.yandex_compute_instance.app: Refreshing state... [id=fhmfh2vajkdocqp8sf8a]
+module.app.yandex_compute_instance.app: Destroying... [id=fhmfh2vajkdocqp8sf8a]
+module.db.yandex_compute_instance.db: Destroying... [id=fhm9lkc0tg6q4hon4a9p]
+module.db.yandex_compute_instance.db: Destruction complete after 9s
+module.app.yandex_compute_instance.app: Destruction complete after 9s
+
+Destroy complete! Resources: 2 destroyed.
+➜  stage git:(ansible-3) ✗ terraform apply --auto-approve
+data.yandex_compute_image.db_image: Refreshing state...
+data.yandex_compute_image.app_image: Refreshing state...
+module.app.yandex_compute_instance.app: Creating...
+module.db.yandex_compute_instance.db: Creating...
+module.db.yandex_compute_instance.db: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [10s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [20s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [30s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [30s elapsed]
+module.db.yandex_compute_instance.db: Still creating... [40s elapsed]
+module.app.yandex_compute_instance.app: Still creating... [40s elapsed]
+module.db.yandex_compute_instance.db: Creation complete after 42s [id=fhm76jsrtjc2ha1ama8f]
+module.app.yandex_compute_instance.app: Creation complete after 45s [id=fhm187e9e0ji8gv7nn4b]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+external_ip_address_app = 84.201.174.143
+external_ip_address_db = 51.250.4.12
+➜  stage git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+----------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP   | INTERNAL IP |
++----------------------+------------+---------------+---------+----------------+-------------+
+| fhm187e9e0ji8gv7nn4b | reddit-app | ru-central1-a | RUNNING | 84.201.174.143 | 10.128.0.23 |
+| fhm76jsrtjc2ha1ama8f | reddit-db  | ru-central1-a | RUNNING | 51.250.4.12    | 10.128.0.24 |
++----------------------+------------+---------------+---------+----------------+-------------+
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml --check
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-153078393a4rqyq/tmp_70_c3e5/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-153078393a4rqyq/tmpu5pk15uq/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.24
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+skipping: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=9    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml --check
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-15309556xyrpd39/tmpsipxj_hz/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-15309556xyrpd39/tmptdzd4sa3/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.24
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+skipping: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=9    changed=6    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+...
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=11   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+Проверим работу приложения
+~~~bash
+➜  ansible git:(ansible-3) ✗ curl http://84.201.174.143:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+Настройка Prod окружения
+
+Для проверки настройки prod окружения сначала удалим инфраструктуру окружения stage. Затем поднимем инфраструктуру для prod окружения.
+~~~bash
+➜  ansible git:(ansible-3) ✗ cd ../terraform/stage
+➜  stage git:(ansible-3) ✗ terraform destroy --auto-approve
+➜  stage git:(ansible-3) ✗ cd ../prod
+➜  prod git:(ansible-3) ✗ terraform apply --auto-approve
+➜  prod git:(ansible-3) ✗ cd ../../ansible
+➜  ansible git:(ansible-3) ✗ ansible-playbook -i environments/prod/inventory playbooks/site.yml
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in prod environment!!!"
+}
+
+TASK [db : Change mongo config file] **************************************************************************************************************
+--- before: /etc/mongod.conf
++++ after: /home/dpp/.ansible/tmp/ansible-local-1534853n7gvhz0s/tmp17pe6aa5/mongod.conf.j2
+@@ -1,43 +1,16 @@
+-# mongod.conf
+-
+-# for documentation of all options, see:
+-#   http://docs.mongodb.org/manual/reference/configuration-options/
+-
+ # Where and how to store data.
+ storage:
+   dbPath: /var/lib/mongodb
+   journal:
+     enabled: true
+-#  engine:
+-#  mmapv1:
+-#  wiredTiger:
+-
+-# where to write logging data.
++# Where to write logging data.
+ systemLog:
+   destination: file
+   logAppend: true
+   path: /var/log/mongodb/mongod.log
+-
+-# network interfaces
++# Network interfaces
+ net:
++  # default - один из фильтров Jinja2, он задает значение по умолчанию,
++  # если переменная слева не определена
+   port: 27017
+-  bindIp: 127.0.0.1
+-
+-
+-# how the process runs
+-processManagement:
+-  timeZoneInfo: /usr/share/zoneinfo
+-
+-#security:
+-
+-#operationProfiling:
+-
+-#replication:
+-
+-#sharding:
+-
+-## Enterprise-Only Options:
+-
+-#auditLog:
+-
+-#snmp:
++  bindIp: 0.0.0.0  # <-- Подстановка значения переменной
+
+changed: [dbserver]
+
+RUNNING HANDLER [db : restart mongod] *************************************************************************************************************
+changed: [dbserver]
+
+PLAY [Configure App] ******************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [app : Show info about the env this host belongs to] *****************************************************************************************
+ok: [appserver] => {
+    "msg": "This host is in prod environment!!!"
+}
+
+TASK [app : Add unit file for Puma] ***************************************************************************************************************
+--- before
++++ after: /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/app/files/puma.service
+@@ -0,0 +1,14 @@
++[Unit]
++Description=Puma HTTP Server
++After=network.target
++
++[Service]
++Type=simple
++EnvironmentFile=/home/ubuntu/db_config
++User=ubuntu
++WorkingDirectory=/home/ubuntu/reddit
++ExecStart=/bin/bash -lc 'puma'
++Restart=always
++
++[Install]
++WantedBy=multi-user.target
+
+changed: [appserver]
+
+TASK [app : Add config for DB connection] *********************************************************************************************************
+--- before
++++ after: /home/dpp/.ansible/tmp/ansible-local-1534853n7gvhz0s/tmp13z45os5/db_config.j2
+@@ -0,0 +1 @@
++DATABASE_URL=10.128.0.20
+
+changed: [appserver]
+
+TASK [app : enable puma] **************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [app : reload puma] ***************************************************************************************************************
+changed: [appserver]
+
+PLAY [Deploy App] *********************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [appserver]
+
+TASK [Install the git] ****************************************************************************************************************************
+The following additional packages will be installed:
+  git-man liberror-perl rsync
+Suggested packages:
+  git-daemon-run | git-daemon-sysvinit git-doc git-el git-email git-gui gitk
+  gitweb git-arch git-cvs git-mediawiki git-svn
+The following NEW packages will be installed:
+  git git-man liberror-perl rsync
+0 upgraded, 4 newly installed, 0 to remove and 8 not upgraded.
+changed: [appserver]
+
+TASK [Fetch the latest version of application code] ***********************************************************************************************
+>> Newly checked out 5c217c565c1122c5343dc0514c116ae816c17ca2
+changed: [appserver]
+
+TASK [bundle install] *****************************************************************************************************************************
+changed: [appserver]
+
+RUNNING HANDLER [restart puma] ********************************************************************************************************************
+changed: [appserver]
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=11   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ yc compute instance list
++----------------------+------------+---------------+---------+----------------+-------------+
+|          ID          |    NAME    |    ZONE ID    | STATUS  |  EXTERNAL IP   | INTERNAL IP |
++----------------------+------------+---------------+---------+----------------+-------------+
+| fhmelc35f4nnhl7sb59l | reddit-app | ru-central1-a | RUNNING | 62.84.115.38   | 10.128.0.25 |
+| fhmfef40vfpbs6astk2r | reddit-db  | ru-central1-a | RUNNING | 84.201.158.213 | 10.128.0.20 |
++----------------------+------------+---------------+---------+----------------+-------------+
+
+➜  ansible git:(ansible-3) ✗ curl http://62.84.115.38:9292
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+...
+~~~
+
+### 3. Используем коммьюнити роль nginx
+
+Используем роль `jdauphant.nginx` и настроим обратное проксирование для нашего приложения с помощью `nginx`.
+Хорошей практикой является разделение зависимостей ролей
+(requirements.yml) по окружениям.
+- Создадим файлы [environments/stage/requirements.yml](./ansible/environments/stage/requirements.yml) и [environments/prod/requirements.yml](./ansble/environments/prod/requirements.yml)
+- Добавим в них запись вида:
+~~~yaml
+- src: jdauphant.nginx
+  version: v2.21.1
+~~~
+
+- Установим роль:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-galaxy install -r environments/stage/requirements.yml
+- downloading role 'nginx', owned by jdauphant
+- downloading role from https://github.com/jdauphant/ansible-role-nginx/archive/v2.21.1.tar.gz
+- extracting jdauphant.nginx to /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/jdauphant.nginx
+- jdauphant.nginx (v2.21.1) was installed successfully
+~~~
+
+- Комьюнити-роли не стоит коммитить в свой репозиторий, для
+этого добавим в [.gitignore](.gitignore) запись: jdauphant.nginx
+
+Для минимальной настройки проксирования необходимо добавить следующие переменные:
+~~~yaml
+nginx_sites:
+  default:
+    - listen 80
+    - server_name "reddit"
+    - location / {
+        proxy_pass http://127.0.0.1:9292;
+      }
+~~~
+Добавим эти переменные в `stage/group_vars/app` и `prod/group_vars/app`
+
+Применим плейбук site.yml для окружения stage и проверим, что приложение теперь доступно на 80 порту:
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+[WARNING]: While constructing a mapping from /home/dpp/otus-devops-2021-11/Deron-D_infra/ansible/roles/jdauphant.nginx/tasks/configuration.yml,
+line 62, column 3, found a duplicate dict key (when). Using last defined value only.
+
+PLAY [Configure MongoDB] **************************************************************************************************************************
+
+TASK [Gathering Facts] ****************************************************************************************************************************
+ok: [dbserver]
+
+TASK [db : Show info about the env this host belongs to] ******************************************************************************************
+ok: [dbserver] => {
+    "msg": "This host is in stage environment!!!"
+}
+...
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=28   changed=19   unreachable=0    failed=0    skipped=17   rescued=0    ignored=0
+dbserver                   : ok=4    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+➜  ansible git:(ansible-3) ✗ curl 51.250.5.15
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
+<meta content='width=device-width, initial-scale=1.0' name='viewport'>
+<title>Monolith Reddit :: All posts</title>
+~~~
+
+
+### 4. Используем Ansible Vault для наших окружений
+
+Подготовим плейбук для создания пользователей, пароль пользователей будем хранить в зашифрованном виде в файле credentials.yml:
+
+- Создадим файл `~/.ansible/vault.key` со произвольной строкой ключа
+- Изменим файл ansible.cfg, добавим опцию `vault_password_file` в секцию `[defaults]`
+~~~ini
+[defaults]
+...
+vault_password_file = vault.key
+~~~
+- Добавим в .gitignore строку для файла vault.key.
+
+- Добавим плейбук для создания пользователей - файл [ansible/playbooks/users.yml](./ansible/playbooks/users.yml)
+~~~yaml
+---
+- name: Create users
+  hosts: all
+  become: true
+
+  vars_files:
+    - "{{ inventory_dir }}/credentials.yml"
+
+  tasks:
+    - name: create users
+      user:
+        name: "{{ item.key }}"
+        password: "{{ item.value.password|password_hash('sha512', 65534|random(seed=inventory_hostname)|string) }}"
+        groups: "{{ item.value.groups | default(omit) }}"
+      with_dict: "{{ credentials.users }}"
+~~~
+
+Создадим файл с данными пользователей для каждого окружения:
+~~~yaml
+ansible/environments/prod/credentials.yml
+
+---
+credentials:
+  users:
+    admin:
+      password: admin123
+      groups: sudo
+
+
+ansible/environments/stage/credentials.yml
+
+---
+credentials:
+  users:
+    admin:
+      password: qwerty123
+      groups: sudo
+    qauser:
+      password: test123
+~~~
+
+- Зашифруем файлы используя vault.key (используем одинаковый для всех окружений):
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-vault encrypt environments/prod/credentials.yml
+Encryption successful
+➜  ansible git:(ansible-3) ✗ ansible-vault encrypt environments/stage/credentials.yml
+Encryption successful
+~~~
+
+- Добавим вызов плейбука в файл site.yml и выполним его для stage окружения:
+
+~~~bash
+➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
+...
+TASK [create users] *******************************************************************************************************************************
+changed: [appserver] => (item={'key': 'admin', 'value': {'password': 'qwerty123', 'groups': 'sudo'}})
+changed: [dbserver] => (item={'key': 'admin', 'value': {'password': 'qwerty123', 'groups': 'sudo'}})
+changed: [appserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
+changed: [dbserver] => (item={'key': 'qauser', 'value': {'password': 'test123'}})
+
+PLAY RECAP ****************************************************************************************************************************************
+appserver                  : ok=23   changed=1    unreachable=0    failed=0    skipped=17   rescued=0    ignored=0
+dbserver                   : ok=5    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+- Проверяем:
+
+~~~bash
+➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.5.15
+admin@51.250.5.15's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+➜  Deron-D_infra git:(ansible-3) ✗ ssh admin@51.250.10.243
+admin@51.250.10.243's password:
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-142-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+$ sudo -s
+[sudo] password for admin:
+#
+~~~
+
+# **Полезное:**
+
+</details>
