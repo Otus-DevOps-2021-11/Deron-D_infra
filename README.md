@@ -4374,6 +4374,9 @@ Deron-D_infra git:(ansible-3) ✗ cd terraform/stage
 ...
 ~~~
 
+### Задание со ⭐⭐
+Настройка TravisCI
+
 
 # **Полезное:**
 
