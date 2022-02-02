@@ -3,6 +3,12 @@
 - name: Show info about the env this host belongs to
   debug: msg="This host is in {{ env }} environment!!!"
 
+- name: Show info about int_addr
+  debug: msg="This host has internal address {{ int_addr }} !!!"
+
+- name: Show info about db_ip_address
+  debug: msg="This host has db internal address {{ db_ip_address }} !!!"
+
 - name: Add unit file for Puma
   copy:
     src: puma.service
