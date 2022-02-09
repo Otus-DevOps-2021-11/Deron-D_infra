@@ -4,3 +4,7 @@ variables.json
 *.tfstate.backup
 *.tfvars
 .terraform/
+*.retry
+__pycache__
+jdauphant.nginx
+vault.key

@@ -9,4 +9,4 @@ private_key_path = "~/.ssh/appuser"
 access_key = "access-key"
 secret_key = "secret-key"
 bucket_name              = "deron-d"
-enable_provision         = true
+enable_provision         = false
