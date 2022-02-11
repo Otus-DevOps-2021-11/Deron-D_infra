@@ -6,5 +6,3 @@ variables.json
 .terraform/
 *.retry
 __pycache__
-jdauphant.nginx
-vault.key
