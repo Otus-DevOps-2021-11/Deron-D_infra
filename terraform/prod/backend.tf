@@ -1,7 +1,7 @@
 terraform {
   backend "s3" {
     endpoint = "storage.yandexcloud.net"
-    bucket   = "deron-d"
+    bucket   = "otus-deron-d-bucket"
     region   = "ru-central1-a"
     key      = "terraform.tfstate"
     # access_key = var.access_key
