@@ -4344,36 +4344,6 @@ $ sudo -s
 #
 ~~~
 
-### Задание со ⭐
-Работа с динамическим инвентори
-
-Скорректируем файлы динамического инвентори в папках окружений для формирования внутреннего `db_ip_address`:
-- [environments/stage/inventory.sh](./ansible/environments/stage/inventory.sh)
-- [environments/prod/inventory.sh](./ansible/environments/prod/inventory.sh)
-
-Приведем в файлах:
-- [environments/stage/group_vars/app](./ansible/environments/stage/group_vars/app)
-- [environments/prod/group_vars/app](./ansible/environments/prod/group_vars/app)
-
-строку с определением значения переменной `db_host: 10.128.0.28` к виду `db_host: "{{ db_ip_address }}"`
-
-Проверяем:
-~~~bash
-Deron-D_infra git:(ansible-3) ✗ cd terraform/stage
-➜  stage git:(ansible-3) ✗ terraform apply --auto-approve
-➜  stage git:(ansible-3) ✗ cd ../../ansible
-➜  ansible git:(ansible-3) ✗ ansible-playbook playbooks/site.yml
-➜  ansible git:(ansible-3) ✗ yc compute instance list | grep app |  awk -F\| '{print $6}' | xargs -n1 curl
-<!DOCTYPE html>
-<html lang='en'>
-<head>
-<meta charset='utf-8'>
-<meta content='IE=Edge,chrome=1' http-equiv='X-UA-Compatible'>
-<meta content='width=device-width, initial-scale=1.0' name='viewport'>
-<title>Monolith Reddit :: All posts</title>
-...
-~~~
-
 # **Полезное:**
 
 </details>
