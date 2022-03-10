@@ -4487,6 +4487,7 @@ db.vm.provision "ansible" do |ansible|
   }
 ~~~
 
+
 ### Задание со ⭐
 
 
