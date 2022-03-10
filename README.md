@@ -4408,6 +4408,84 @@ Deron-D_infra git:(ansible-3) ✗ cd terraform/stage
 
 ## **Выполнено:**
 
+1.Установим необходимое ПО**
+
+- VirtualBox v.6.1.13: <https://www.virtualbox.org/wiki/Linux_Downloads>
+
+- Vagrant v.2.2.19
+
+```Bash
+brew install vagrant
+vagrant -v
+Vagrant 2.2.19
+```
+2. Создадим виртуалки, описанные в [Vagrantfile](./ansible/Vagrantfile)
+~~~bash
+vagrant up
+Bringing machine 'dbserver' up with 'virtualbox' provider...
+Bringing machine 'appserver' up with 'virtualbox' provider...
+...
+vagrant box list
+centos/8.2      (virtualbox, 0)
+ubuntu/xenial64 (virtualbox, 20211001.0.0)
+
+vagrant status
+Current machine states:
+
+dbserver                  running (virtualbox)
+appserver                 running (virtualbox)
+
+This environment represents multiple VMs. The VMs are all listed
+above with their current state. For more information about a specific
+VM, run `vagrant status NAME`.
+~~~
+
+Проверим SSH доступ к VM с названием appserver и проверим пинг хоста dbserver по адрес
+~~~bash
+ansible % vagrant ssh appserver
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-210-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+UA Infra: Extended Security Maintenance (ESM) is not enabled.
+
+1 update can be applied immediately.
+To see these additional updates run: apt list --upgradable
+
+83 additional security updates can be applied with UA Infra: ESM
+Learn more about enabling UA Infra: ESM service for Ubuntu 16.04 at
+https://ubuntu.com/16-04
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+New release '18.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+
+vagrant@appserver:~$ ping -c 2 10.10.10.10
+PING 10.10.10.10 (10.10.10.10) 56(84) bytes of data.
+64 bytes from 10.10.10.10: icmp_seq=1 ttl=64 time=0.607 ms
+64 bytes from 10.10.10.10: icmp_seq=2 ttl=64 time=0.561 ms
+
+--- 10.10.10.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1000ms
+rtt min/avg/max/mdev = 0.561/0.584/0.607/0.023 ms
+~~~
+
+3. Доработка провижинеров
+
+Добавим провижининг в определение хоста dbserver:
+~~~Vagrantfile
+db.vm.provision "ansible" do |ansible|
+  ansible.playbook = "playbooks/site.yml"
+  ansible.groups = {
+  "db" => ["dbserver"],
+  "db:vars" => {"mongo_bind_ip" => "0.0.0.0"}
+  }
+~~~
 
 ### Задание со ⭐
 
