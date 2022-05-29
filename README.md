@@ -4408,7 +4408,7 @@ Deron-D_infra git:(ansible-3) ✗ cd terraform/stage
 
 ## **Выполнено:**
 
-1.Установим необходимое ПО**
+## 1.Установим необходимое ПО**
 
 - VirtualBox v.6.1.13: <https://www.virtualbox.org/wiki/Linux_Downloads>
 
@@ -4419,7 +4419,7 @@ brew install vagrant
 vagrant -v
 Vagrant 2.2.19
 ```
-2. Создадим виртуалки, описанные в [Vagrantfile](./ansible/Vagrantfile)
+## 2. Создадим виртуалки, описанные в [Vagrantfile](./ansible/Vagrantfile)
 ~~~bash
 vagrant up
 Bringing machine 'dbserver' up with 'virtualbox' provider...
@@ -4475,7 +4475,7 @@ PING 10.10.10.10 (10.10.10.10) 56(84) bytes of data.
 rtt min/avg/max/mdev = 0.561/0.584/0.607/0.023 ms
 ~~~
 
-3. Доработка провижинеров
+## 3. Доработка провижинеров
 
 - ### Добавим провижининг в определение хоста dbserver:
 ~~~Vagrantfile
@@ -4580,7 +4580,210 @@ appserver                  : ok=13   changed=8    unreachable=0    failed=0    s
 
 ![vagrant-1](./ansible/screens/vagrant-1.png)
 
-4. Тестирование роли
+## 4. Тестирование роли
+
+- ### Установим все необходимые компоненты для тестирования: Molecule, Ansible, Testinfra на локальную машину используя pip. Установку данных модулей рекомендуется выполнять в созданной через virtualenv среде работы с питоном.
+> [Инструкции по установке virtualenv и virtualenvwrapper](https://docs.python-guide.org/dev/virtualenvs/)
+~~~bash
+sudo apt-get install pip
+pip --version
+pip 22.1.1 from /home/dpp/.local/lib/python3.10/site-packages/pip (python 3.10)
+...
+pip install --user pipenv
+cd roles/db  
+virtualenv venv
+ANSIBLE_SKIP_CONFLICT_CHECK=1 pip install -r requirements.txt
+molecule --version 
+molecule 3.6.1 using python 3.10 
+    ansible:2.12.6
+    delegated:3.6.1 from molecule
+pip install molecule-vagrant
+~~~
+
+- ### Тестирование db роли
+
+  - Используем команду molecule init для создания заготовки тестов для роли db. Выполним команду ниже в директории с ролью ansible/roles/db:
+~~~bash
+molecule init scenario --role-name db --driver-name vagrant
+
+INFO     Initializing new scenario default...
+INFO     Initialized scenario in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default successfully.
+~~~
+
+  - Добавим несколько тестов, используя модули Testinfra, для проверки конфигурации, настраиваемой ролью db, в файле `db/molecule/default/tests/test_default.py`:
+~~~python
+import os
+
+import testinfra.utils.ansible_runner
+
+testinfra_hosts = testinfra.utils.ansible_runner.AnsibleRunner(
+    os.environ['MOLECULE_INVENTORY_FILE']).get_hosts('all')
+
+# check if MongoDB is enabled and running
+def test_mongo_running_and_enabled(host):
+    mongo = host.service("mongod")
+    assert mongo.is_running
+    assert mongo.is_enabled
+
+# check if configuration file contains the required line
+def test_config_file(host):
+    config_file = host.file('/etc/mongod.conf')
+    assert config_file.contains('bindIp: 0.0.0.0')
+    assert config_file.is_file
+~~~
+
+  - Описание тестовой машины, которая создается Molecule для тестов содержится в файле `db/molecule/default/molecule.yml`
+
+  - Создадим VM для проверки роли:
+~~~bash
+molecule create
+molecule list
+INFO     Running default > list
+                ╷             ╷                  ╷               ╷         ╷            
+  Instance Name │ Driver Name │ Provisioner Name │ Scenario Name │ Created │ Converged  
+╶───────────────┼─────────────┼──────────────────┼───────────────┼─────────┼───────────╴
+  instance      │ vagrant     │ ansible          │ default       │ true    │ false    
+~~~
+
+- Применим 'converge.yml', в котором вызывается наша роль к созданному хосту:
+~~~bash
+➜  db git:(ansible-4) ✗ molecule converge
+INFO     default scenario test matrix: dependency, create, prepare, converge
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > dependency
+WARNING  Skipping, missing the requirements file.
+WARNING  Skipping, missing the requirements file.
+INFO     Running default > create
+WARNING  Skipping, instances already created.
+INFO     Running default > prepare
+WARNING  Skipping, instances already prepared.
+INFO     Running default > converge
+
+PLAY [Converge] ****************************************************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [instance]
+
+TASK [Include db] **************************************************************
+[DEPRECATION WARNING]: "include" is deprecated, use include_tasks/import_tasks 
+instead. This feature will be removed in version 2.16. Deprecation warnings can
+ be disabled by setting deprecation_warnings=False in ansible.cfg.
+
+TASK [db : Show info about the env this host belongs to] ***********************
+ok: [instance] => {
+    "msg": "This host is in local environment!!!"
+}
+
+TASK [db : Add APT key] ********************************************************
+ok: [instance]
+
+TASK [db : Add APT repository] *************************************************
+ok: [instance]
+
+TASK [db : Install mongodb package] ********************************************
+changed: [instance]
+
+TASK [db : Configure service] **************************************************
+changed: [instance]
+
+TASK [db : Change mongo config file] *******************************************
+changed: [instance]
+
+RUNNING HANDLER [db : restart mongod] ******************************************
+changed: [instance]
+
+PLAY RECAP *********************************************************************
+instance                   : ok=8    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+- Прогоним тесты
+~~~bash
+molecule verify 
+INFO     default scenario test matrix: verify
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > verify
+INFO     Executing Testinfra tests found in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default/tests/...
+/home/dpp/.local/lib/python3.10/site-packages/_testinfra_renamed.py:5: DeprecationWarning: testinfra package has been renamed to pytest-testinfra. Please `pip install pytest-testinfra` and `pip uninstall testinfra` and update your package requirements to avoid this message
+  warnings.warn((
+============================= test session starts ==============================
+platform linux -- Python 3.10.4, pytest-7.1.2, pluggy-1.0.0
+rootdir: /home/dpp
+plugins: testinfra-6.7.0, testinfra-6.0.0
+collected 2 items
+
+molecule/default/tests/test_default.py ..                                [100%]
+
+============================== 2 passed in 1.51s ===============================
+INFO     Verifier completed successfully.
+~~~
+
+- В `tests/test_default.py` допишем проверку порта 27017:
+~~~python
+# check mongodb port
+def test_mongo_port(host):
+    socket = host.socket('tcp://0.0.0.0:27017')
+    assert socket.is_listening
+~~~
+
+- Прогоняем
+~~~bash
+molecule verify
+INFO     default scenario test matrix: verify
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > verify
+INFO     Executing Testinfra tests found in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default/tests/...
+/home/dpp/.local/lib/python3.10/site-packages/_testinfra_renamed.py:5: DeprecationWarning: testinfra package has been renamed to pytest-testinfra. Please `pip install pytest-testinfra` and `pip uninstall testinfra` and update your package requirements to avoid this message
+  warnings.warn((
+============================= test session starts ==============================
+platform linux -- Python 3.10.4, pytest-7.1.2, pluggy-1.0.0
+rootdir: /home/dpp
+plugins: testinfra-6.7.0, testinfra-6.0.0
+collected 3 items
+
+molecule/default/tests/test_default.py ...                               [100%]
+
+============================== 3 passed in 1.63s ===============================
+INFO     Verifier completed successfully.
+~~~
+
+## 5. Наcтройка использования ролей db и app в плейбуках packer_db.yml и packer_app.yml при сборке образов Packer
+
+Корректируем `packer/app.json`
+~~~yml
+    "provisioners": [
+        {
+            "type": "ansible",
+            "playbook_file": "ansible/playbooks/packer_app.yml",
+            "extra_arguments": ["--tags","ruby"],
+            "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"]
+        }
+    ]
+~~~
+
+Корректируем `packer/db.json`
+~~~yml
+    "provisioners": [
+        {
+            "type": "ansible",
+            "playbook_file": "ansible/playbooks/packer_db.yml",
+            "extra_arguments": ["--tags","install"],
+            "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"]
+        }
+    ]
+~~~
+
 
 # **Полезное:**
 
