@@ -4477,7 +4477,7 @@ rtt min/avg/max/mdev = 0.561/0.584/0.607/0.023 ms
 
 3. Доработка провижинеров
 
-Добавим провижининг в определение хоста dbserver:
+- ### Добавим провижининг в определение хоста dbserver:
 ~~~Vagrantfile
 db.vm.provision "ansible" do |ansible|
   ansible.playbook = "playbooks/site.yml"
@@ -4487,9 +4487,100 @@ db.vm.provision "ansible" do |ansible|
   }
 ~~~
 
+- ### Доработаем роль db в соответствии с методичкой 
+  - Создадим `ansible/roles/db/tasks/config_mongo.yml` `ansible/roles/db/tasks/install_mongo.yml` + соответствующая правка `ansible/roles/db/tasks/main.yml`) и проверим:
+~~~bash
+vagrant provision dbserver
+==> dbserver: Running provisioner: ansible...
+    dbserver: Running ansible-playbook... 
+...
+PLAY RECAP *********************************************************************
+dbserver                   : ok=7    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+~~~
 
-### Задание со ⭐
+  - Видим, что провижининг выполнился успешно. Проверим доступность порта монги для хоста appserver, используя команду telnet
+~~~bash
+vagrant ssh appserver     
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-210-generic x86_64)
 
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+UA Infra: Extended Security Maintenance (ESM) is not enabled.
+
+0 updates can be applied immediately.
+
+45 additional security updates can be applied with UA Infra: ESM
+Learn more about enabling UA Infra: ESM service for Ubuntu 16.04 at
+https://ubuntu.com/16-04
+
+New release '18.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+
+vagrant@appserver:~$ telnet 10.10.10.10 27017
+Trying 10.10.10.10...
+Connected to 10.10.10.10.
+Escape character is '^]'.
+~~~
+
+- ### Доработаем роль app в соответствии с методичкой 
+  - Создадим `ansible/roles/app/tasks/ruby.yml` `ansible/roles/app/tasks/puma.yml` + соответствующая правка `ansible/roles/app/tasks/main.yml`)
+  - Аналогично dbserver определим Ansible провижинер для хоста `appserver` в Vagrantfile и проверим:
+~~~bash
+vagrant provision appserver
+==> appserver: Running provisioner: ansible...
+    appserver: Running ansible-playbook...
+...
+TASK [Fetch the latest version of application code] ****************************
+fatal: [appserver]: FAILED! => {"changed": false, "cmd": "/usr/bin/git clone --origin origin https://github.com/express42/reddit.git /home/ubuntu/reddit", "msg": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied", "rc": 128, "stderr": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied\n", "stderr_lines": ["fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied"], "stdout": "", "stdout_lines": []}
+
+PLAY RECAP *********************************************************************
+appserver                  : ok=9    changed=2    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+
+Ansible failed to complete successfully. Any error output should be
+visible above. Please fix these errors and try again.
+~~~
+
+Мы можем видеть, что наш провижининг работает и наша роль произвела некоторые настройки как, например, установка ruby, bundler, unit файла для Puma.
+Но Ansible не удалось создать файл с настройками подключения к БД, потому что данный файл он пытается создать в домашней директории пользователя appuser, которого у нас нет.
+У нас есть два варианта решения проблемы: 1) создать пользователя, как часть роли; 2) параметризировать нашу конфигурацию, чтобы мы могли использовать ее для пользователя другого, чем appuser.
+Мы пойдем по второму пути.
+
+- ### Параметризации роли
+  - Определим переменную по умолчанию внутри нашей роли в `app/defaults/main.yml`
+  - Параметризируем `roles/app/tasks/puma.yml`, `roles/app/templates/puma.service.j2`, `playbooks/deploy.yml`
+  - Добавим `extra_vars` переменные в блок определения провижинера в `Vagrantfile`
+  ~~~yaml
+     app.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbooks/site.yml"
+      ansible.groups = {
+      "app" => ["appserver"],
+      "app:vars" => { "db_host" => "10.10.10.10"}
+      }
+      ansible.extra_vars = {
+        "deploy_user" => "vagrant"
+      }
+  ~~~
+
+- ### Проверим роль и работу приложения
+~~~bash
+➜  ansible git:(ansible-4) ✗ vagrant destroy appserver
+    appserver: Are you sure you want to destroy the 'appserver' VM? [y/N] y
+==> appserver: Forcing shutdown of VM...
+==> appserver: Destroying VM and associated drives...
+➜  ansible git:(ansible-4) ✗ vagrant up appserver 
+...
+
+PLAY RECAP *********************************************************************
+appserver                  : ok=13   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+~~~
+
+
+![vagrant-1](./ansible/screens/vagrant-1.png)
+
+4. Тестирование роли
 
 # **Полезное:**
 
