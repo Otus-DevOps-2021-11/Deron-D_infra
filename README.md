@@ -4377,3 +4377,443 @@ Deron-D_infra git:(ansible-3) ✗ cd terraform/stage
 # **Полезное:**
 
 </details>
+
+# **Лекция №13: Локальная разработка Ansible ролей с Vagrant. Тестирование конфигурации.**
+> _ansible-4_
+<details>
+ <summary>Разработка и тестирование Ansible ролей и плейбуков.</summary>
+
+## **Задание:**
+Доработка имеющихся ролей локально с использование Vagrant.
+
+Цель:
+В данном дз студент научится тестировать написанные ранее роли при помощи Molecule, Testinfra и Vagrant.
+В данном задании тренируются навыки: работы с molecula, testinfra, bagrant.
+
+Описание/Пошаговая инструкция выполнения домашнего задания:
+Все действия описаны в методическом указании.
+
+Критерии оценки:
+0 б. - задание не выполнено
+1 б. - задание выполнено
+2 б. - выполнены все дополнительные задания
+
+### План
+- Локальная разработка при помощи Vagrant, доработка ролей для провижининга в Vagrant
+- Тестирование ролей при помощи Molecule и Testinfra
+- Переключение сбора образов пакером на использование ролей
+- Подключение Travis CI для автоматического прогона тестов (⭐)
+
+---
+
+## **Выполнено:**
+
+## 1.Установим необходимое ПО**
+
+- VirtualBox v.6.1.13: <https://www.virtualbox.org/wiki/Linux_Downloads>
+
+- Vagrant v.2.2.19
+
+```Bash
+brew install vagrant
+vagrant -v
+Vagrant 2.2.19
+```
+## 2. Создадим виртуалки, описанные в [Vagrantfile](./ansible/Vagrantfile)
+~~~bash
+vagrant up
+Bringing machine 'dbserver' up with 'virtualbox' provider...
+Bringing machine 'appserver' up with 'virtualbox' provider...
+...
+vagrant box list
+centos/8.2      (virtualbox, 0)
+ubuntu/xenial64 (virtualbox, 20211001.0.0)
+
+vagrant status
+Current machine states:
+
+dbserver                  running (virtualbox)
+appserver                 running (virtualbox)
+
+This environment represents multiple VMs. The VMs are all listed
+above with their current state. For more information about a specific
+VM, run `vagrant status NAME`.
+~~~
+
+Проверим SSH доступ к VM с названием appserver и проверим пинг хоста dbserver по адрес
+~~~bash
+ansible % vagrant ssh appserver
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-210-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+UA Infra: Extended Security Maintenance (ESM) is not enabled.
+
+1 update can be applied immediately.
+To see these additional updates run: apt list --upgradable
+
+83 additional security updates can be applied with UA Infra: ESM
+Learn more about enabling UA Infra: ESM service for Ubuntu 16.04 at
+https://ubuntu.com/16-04
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+New release '18.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+
+vagrant@appserver:~$ ping -c 2 10.10.10.10
+PING 10.10.10.10 (10.10.10.10) 56(84) bytes of data.
+64 bytes from 10.10.10.10: icmp_seq=1 ttl=64 time=0.607 ms
+64 bytes from 10.10.10.10: icmp_seq=2 ttl=64 time=0.561 ms
+
+--- 10.10.10.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1000ms
+rtt min/avg/max/mdev = 0.561/0.584/0.607/0.023 ms
+~~~
+
+## 3. Доработка провижинеров
+
+- ### Добавим провижининг в определение хоста dbserver:
+~~~Vagrantfile
+db.vm.provision "ansible" do |ansible|
+  ansible.playbook = "playbooks/site.yml"
+  ansible.groups = {
+  "db" => ["dbserver"],
+  "db:vars" => {"mongo_bind_ip" => "0.0.0.0"}
+  }
+~~~
+
+- ### Доработаем роль db в соответствии с методичкой
+  - Создадим `ansible/roles/db/tasks/config_mongo.yml` `ansible/roles/db/tasks/install_mongo.yml` + соответствующая правка `ansible/roles/db/tasks/main.yml`) и проверим:
+~~~bash
+vagrant provision dbserver
+==> dbserver: Running provisioner: ansible...
+    dbserver: Running ansible-playbook...
+...
+PLAY RECAP *********************************************************************
+dbserver                   : ok=7    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+  - Видим, что провижининг выполнился успешно. Проверим доступность порта монги для хоста appserver, используя команду telnet
+~~~bash
+vagrant ssh appserver
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-210-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+UA Infra: Extended Security Maintenance (ESM) is not enabled.
+
+0 updates can be applied immediately.
+
+45 additional security updates can be applied with UA Infra: ESM
+Learn more about enabling UA Infra: ESM service for Ubuntu 16.04 at
+https://ubuntu.com/16-04
+
+New release '18.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+
+vagrant@appserver:~$ telnet 10.10.10.10 27017
+Trying 10.10.10.10...
+Connected to 10.10.10.10.
+Escape character is '^]'.
+~~~
+
+- ### Доработаем роль app в соответствии с методичкой
+  - Создадим `ansible/roles/app/tasks/ruby.yml` `ansible/roles/app/tasks/puma.yml` + соответствующая правка `ansible/roles/app/tasks/main.yml`)
+  - Аналогично dbserver определим Ansible провижинер для хоста `appserver` в Vagrantfile и проверим:
+~~~bash
+vagrant provision appserver
+==> appserver: Running provisioner: ansible...
+    appserver: Running ansible-playbook...
+...
+TASK [Fetch the latest version of application code] ****************************
+fatal: [appserver]: FAILED! => {"changed": false, "cmd": "/usr/bin/git clone --origin origin https://github.com/express42/reddit.git /home/ubuntu/reddit", "msg": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied", "rc": 128, "stderr": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied\n", "stderr_lines": ["fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied"], "stdout": "", "stdout_lines": []}
+
+PLAY RECAP *********************************************************************
+appserver                  : ok=9    changed=2    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+
+Ansible failed to complete successfully. Any error output should be
+visible above. Please fix these errors and try again.
+~~~
+
+Мы можем видеть, что наш провижининг работает и наша роль произвела некоторые настройки как, например, установка ruby, bundler, unit файла для Puma.
+Но Ansible не удалось создать файл с настройками подключения к БД, потому что данный файл он пытается создать в домашней директории пользователя appuser, которого у нас нет.
+У нас есть два варианта решения проблемы: 1) создать пользователя, как часть роли; 2) параметризировать нашу конфигурацию, чтобы мы могли использовать ее для пользователя другого, чем appuser.
+Мы пойдем по второму пути.
+
+- ### Параметризации роли
+  - Определим переменную по умолчанию внутри нашей роли в `app/defaults/main.yml`
+  - Параметризируем `roles/app/tasks/puma.yml`, `roles/app/templates/puma.service.j2`, `playbooks/deploy.yml`
+  - Добавим `extra_vars` переменные в блок определения провижинера в `Vagrantfile`
+  ~~~yaml
+     app.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbooks/site.yml"
+      ansible.groups = {
+      "app" => ["appserver"],
+      "app:vars" => { "db_host" => "10.10.10.10"}
+      }
+      ansible.extra_vars = {
+        "deploy_user" => "vagrant"
+      }
+  ~~~
+
+- ### Проверим роль и работу приложения
+~~~bash
+➜  ansible git:(ansible-4) ✗ vagrant destroy appserver
+    appserver: Are you sure you want to destroy the 'appserver' VM? [y/N] y
+==> appserver: Forcing shutdown of VM...
+==> appserver: Destroying VM and associated drives...
+➜  ansible git:(ansible-4) ✗ vagrant up appserver
+...
+
+PLAY RECAP *********************************************************************
+appserver                  : ok=13   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+
+![vagrant-1](./ansible/screens/vagrant-1.png)
+
+## 4. Тестирование роли
+
+- ### Установим все необходимые компоненты для тестирования: Molecule, Ansible, Testinfra на локальную машину используя pip. Установку данных модулей рекомендуется выполнять в созданной через virtualenv среде работы с питоном.
+> [Инструкции по установке virtualenv и virtualenvwrapper](https://docs.python-guide.org/dev/virtualenvs/)
+~~~bash
+sudo apt-get install pip
+pip --version
+pip 22.1.1 from /home/dpp/.local/lib/python3.10/site-packages/pip (python 3.10)
+...
+pip install --user pipenv
+cd roles/db
+virtualenv venv
+ANSIBLE_SKIP_CONFLICT_CHECK=1 pip install -r requirements.txt
+molecule --version
+molecule 3.6.1 using python 3.10
+    ansible:2.12.6
+    delegated:3.6.1 from molecule
+pip install molecule-vagrant
+~~~
+
+- ### Тестирование db роли
+
+  - Используем команду molecule init для создания заготовки тестов для роли db. Выполним команду ниже в директории с ролью ansible/roles/db:
+~~~bash
+molecule init scenario --role-name db --driver-name vagrant
+
+INFO     Initializing new scenario default...
+INFO     Initialized scenario in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default successfully.
+~~~
+
+  - Добавим несколько тестов, используя модули Testinfra, для проверки конфигурации, настраиваемой ролью db, в файле `db/molecule/default/tests/test_default.py`:
+~~~python
+import os
+
+import testinfra.utils.ansible_runner
+
+testinfra_hosts = testinfra.utils.ansible_runner.AnsibleRunner(
+    os.environ['MOLECULE_INVENTORY_FILE']).get_hosts('all')
+
+# check if MongoDB is enabled and running
+def test_mongo_running_and_enabled(host):
+    mongo = host.service("mongod")
+    assert mongo.is_running
+    assert mongo.is_enabled
+
+# check if configuration file contains the required line
+def test_config_file(host):
+    config_file = host.file('/etc/mongod.conf')
+    assert config_file.contains('bindIp: 0.0.0.0')
+    assert config_file.is_file
+~~~
+
+  - Описание тестовой машины, которая создается Molecule для тестов содержится в файле `db/molecule/default/molecule.yml`
+
+  - Создадим VM для проверки роли:
+~~~bash
+molecule create
+molecule list
+INFO     Running default > list
+                ╷             ╷                  ╷               ╷         ╷
+  Instance Name │ Driver Name │ Provisioner Name │ Scenario Name │ Created │ Converged
+╶───────────────┼─────────────┼──────────────────┼───────────────┼─────────┼───────────╴
+  instance      │ vagrant     │ ansible          │ default       │ true    │ false
+~~~
+
+- Применим 'converge.yml', в котором вызывается наша роль к созданному хосту:
+~~~bash
+➜  db git:(ansible-4) ✗ molecule converge
+INFO     default scenario test matrix: dependency, create, prepare, converge
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > dependency
+WARNING  Skipping, missing the requirements file.
+WARNING  Skipping, missing the requirements file.
+INFO     Running default > create
+WARNING  Skipping, instances already created.
+INFO     Running default > prepare
+WARNING  Skipping, instances already prepared.
+INFO     Running default > converge
+
+PLAY [Converge] ****************************************************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [instance]
+
+TASK [Include db] **************************************************************
+[DEPRECATION WARNING]: "include" is deprecated, use include_tasks/import_tasks
+instead. This feature will be removed in version 2.16. Deprecation warnings can
+ be disabled by setting deprecation_warnings=False in ansible.cfg.
+
+TASK [db : Show info about the env this host belongs to] ***********************
+ok: [instance] => {
+    "msg": "This host is in local environment!!!"
+}
+
+TASK [db : Add APT key] ********************************************************
+ok: [instance]
+
+TASK [db : Add APT repository] *************************************************
+ok: [instance]
+
+TASK [db : Install mongodb package] ********************************************
+changed: [instance]
+
+TASK [db : Configure service] **************************************************
+changed: [instance]
+
+TASK [db : Change mongo config file] *******************************************
+changed: [instance]
+
+RUNNING HANDLER [db : restart mongod] ******************************************
+changed: [instance]
+
+PLAY RECAP *********************************************************************
+instance                   : ok=8    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+~~~
+
+- Прогоним тесты
+~~~bash
+molecule verify
+INFO     default scenario test matrix: verify
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > verify
+INFO     Executing Testinfra tests found in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default/tests/...
+/home/dpp/.local/lib/python3.10/site-packages/_testinfra_renamed.py:5: DeprecationWarning: testinfra package has been renamed to pytest-testinfra. Please `pip install pytest-testinfra` and `pip uninstall testinfra` and update your package requirements to avoid this message
+  warnings.warn((
+============================= test session starts ==============================
+platform linux -- Python 3.10.4, pytest-7.1.2, pluggy-1.0.0
+rootdir: /home/dpp
+plugins: testinfra-6.7.0, testinfra-6.0.0
+collected 2 items
+
+molecule/default/tests/test_default.py ..                                [100%]
+
+============================== 2 passed in 1.51s ===============================
+INFO     Verifier completed successfully.
+~~~
+
+- В `tests/test_default.py` допишем проверку порта 27017:
+~~~python
+# check mongodb port
+def test_mongo_port(host):
+    socket = host.socket('tcp://0.0.0.0:27017')
+    assert socket.is_listening
+~~~
+
+- Прогоняем
+~~~bash
+molecule verify
+INFO     default scenario test matrix: verify
+INFO     Performing prerun...
+INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
+INFO     Set ANSIBLE_COLLECTIONS_PATH=/home/dpp/.cache/ansible-compat/7bdc25/collections:/home/dpp/.ansible/collections:/usr/share/ansible/collections
+INFO     Set ANSIBLE_ROLES_PATH=/home/dpp/.cache/ansible-compat/7bdc25/roles:/home/dpp/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles
+INFO     Using /home/dpp/.cache/ansible-compat/7bdc25/roles/test.db symlink to current repository in order to enable Ansible to find the role using its expected full name.
+INFO     Running default > verify
+INFO     Executing Testinfra tests found in /home/dpp/Документы/GitHub/Deron-D_infra/ansible/roles/db/molecule/default/tests/...
+/home/dpp/.local/lib/python3.10/site-packages/_testinfra_renamed.py:5: DeprecationWarning: testinfra package has been renamed to pytest-testinfra. Please `pip install pytest-testinfra` and `pip uninstall testinfra` and update your package requirements to avoid this message
+  warnings.warn((
+============================= test session starts ==============================
+platform linux -- Python 3.10.4, pytest-7.1.2, pluggy-1.0.0
+rootdir: /home/dpp
+plugins: testinfra-6.7.0, testinfra-6.0.0
+collected 3 items
+
+molecule/default/tests/test_default.py ...                               [100%]
+
+============================== 3 passed in 1.63s ===============================
+INFO     Verifier completed successfully.
+~~~
+
+## 5. Наcтройка использования ролей db и app в плейбуках packer_db.yml и packer_app.yml при сборке образов Packer
+
+Корректируем `packer/app.json`
+~~~yml
+    "provisioners": [
+        {
+            "type": "ansible",
+            "playbook_file": "ansible/playbooks/packer_app.yml",
+            "extra_arguments": ["--tags","ruby"],
+            "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"]
+        }
+    ]
+~~~
+
+Корректируем `packer/db.json`
+~~~yml
+    "provisioners": [
+        {
+            "type": "ansible",
+            "playbook_file": "ansible/playbooks/packer_db.yml",
+            "extra_arguments": ["--tags","install"],
+            "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"]
+        }
+    ]
+~~~
+
+Приводим `ansible/playbooks/packer_app.yml` к виду:
+~~~yml
+---
+- name: Ruby Bake
+  hosts: all
+  become: true
+
+  roles:
+    - app
+
+~~~
+
+Приводим `ansible/playbooks/packer_db.yml` к виду:
+~~~yml
+---
+- name: MongoDB Bake
+  hosts: all
+  become: true
+
+  roles:
+    - db
+
+~~~
+
+Пересоздаем образы:
+~~~bash
+packer build -var-file=./packer/variables.json ./packer/app.json
+packer build -var-file=./packer/variables.json ./packer/db.json
+~~~
+
+# **Полезное:**
+
+</details>
