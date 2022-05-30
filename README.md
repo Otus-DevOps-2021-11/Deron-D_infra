@@ -4487,20 +4487,20 @@ db.vm.provision "ansible" do |ansible|
   }
 ~~~
 
-- ### Доработаем роль db в соответствии с методичкой 
+- ### Доработаем роль db в соответствии с методичкой
   - Создадим `ansible/roles/db/tasks/config_mongo.yml` `ansible/roles/db/tasks/install_mongo.yml` + соответствующая правка `ansible/roles/db/tasks/main.yml`) и проверим:
 ~~~bash
 vagrant provision dbserver
 ==> dbserver: Running provisioner: ansible...
-    dbserver: Running ansible-playbook... 
+    dbserver: Running ansible-playbook...
 ...
 PLAY RECAP *********************************************************************
-dbserver                   : ok=7    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+dbserver                   : ok=7    changed=4    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ~~~
 
   - Видим, что провижининг выполнился успешно. Проверим доступность порта монги для хоста appserver, используя команду telnet
 ~~~bash
-vagrant ssh appserver     
+vagrant ssh appserver
 Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-210-generic x86_64)
 
  * Documentation:  https://help.ubuntu.com
@@ -4525,7 +4525,7 @@ Connected to 10.10.10.10.
 Escape character is '^]'.
 ~~~
 
-- ### Доработаем роль app в соответствии с методичкой 
+- ### Доработаем роль app в соответствии с методичкой
   - Создадим `ansible/roles/app/tasks/ruby.yml` `ansible/roles/app/tasks/puma.yml` + соответствующая правка `ansible/roles/app/tasks/main.yml`)
   - Аналогично dbserver определим Ansible провижинер для хоста `appserver` в Vagrantfile и проверим:
 ~~~bash
@@ -4537,7 +4537,7 @@ TASK [Fetch the latest version of application code] ****************************
 fatal: [appserver]: FAILED! => {"changed": false, "cmd": "/usr/bin/git clone --origin origin https://github.com/express42/reddit.git /home/ubuntu/reddit", "msg": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied", "rc": 128, "stderr": "fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied\n", "stderr_lines": ["fatal: could not create work tree dir '/home/ubuntu/reddit': Permission denied"], "stdout": "", "stdout_lines": []}
 
 PLAY RECAP *********************************************************************
-appserver                  : ok=9    changed=2    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+appserver                  : ok=9    changed=2    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
 
 Ansible failed to complete successfully. Any error output should be
 visible above. Please fix these errors and try again.
@@ -4570,11 +4570,11 @@ visible above. Please fix these errors and try again.
     appserver: Are you sure you want to destroy the 'appserver' VM? [y/N] y
 ==> appserver: Forcing shutdown of VM...
 ==> appserver: Destroying VM and associated drives...
-➜  ansible git:(ansible-4) ✗ vagrant up appserver 
+➜  ansible git:(ansible-4) ✗ vagrant up appserver
 ...
 
 PLAY RECAP *********************************************************************
-appserver                  : ok=13   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+appserver                  : ok=13   changed=8    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ~~~
 
 
@@ -4590,11 +4590,11 @@ pip --version
 pip 22.1.1 from /home/dpp/.local/lib/python3.10/site-packages/pip (python 3.10)
 ...
 pip install --user pipenv
-cd roles/db  
+cd roles/db
 virtualenv venv
 ANSIBLE_SKIP_CONFLICT_CHECK=1 pip install -r requirements.txt
-molecule --version 
-molecule 3.6.1 using python 3.10 
+molecule --version
+molecule 3.6.1 using python 3.10
     ansible:2.12.6
     delegated:3.6.1 from molecule
 pip install molecule-vagrant
@@ -4639,10 +4639,10 @@ def test_config_file(host):
 molecule create
 molecule list
 INFO     Running default > list
-                ╷             ╷                  ╷               ╷         ╷            
-  Instance Name │ Driver Name │ Provisioner Name │ Scenario Name │ Created │ Converged  
+                ╷             ╷                  ╷               ╷         ╷
+  Instance Name │ Driver Name │ Provisioner Name │ Scenario Name │ Created │ Converged
 ╶───────────────┼─────────────┼──────────────────┼───────────────┼─────────┼───────────╴
-  instance      │ vagrant     │ ansible          │ default       │ true    │ false    
+  instance      │ vagrant     │ ansible          │ default       │ true    │ false
 ~~~
 
 - Применим 'converge.yml', в котором вызывается наша роль к созданному хосту:
@@ -4669,7 +4669,7 @@ TASK [Gathering Facts] *********************************************************
 ok: [instance]
 
 TASK [Include db] **************************************************************
-[DEPRECATION WARNING]: "include" is deprecated, use include_tasks/import_tasks 
+[DEPRECATION WARNING]: "include" is deprecated, use include_tasks/import_tasks
 instead. This feature will be removed in version 2.16. Deprecation warnings can
  be disabled by setting deprecation_warnings=False in ansible.cfg.
 
@@ -4702,7 +4702,7 @@ instance                   : ok=8    changed=4    unreachable=0    failed=0    s
 
 - Прогоним тесты
 ~~~bash
-molecule verify 
+molecule verify
 INFO     default scenario test matrix: verify
 INFO     Performing prerun...
 INFO     Set ANSIBLE_LIBRARY=/home/dpp/.cache/ansible-compat/7bdc25/modules:/home/dpp/.ansible/plugins/modules:/usr/share/ansible/plugins/modules
@@ -4784,6 +4784,35 @@ INFO     Verifier completed successfully.
     ]
 ~~~
 
+Приводим `ansible/playbooks/packer_app.yml` к виду:
+~~~yml
+---
+- name: Ruby Bake
+  hosts: all
+  become: true
+
+  roles:
+    - app
+
+~~~
+
+Приводим `ansible/playbooks/packer_db.yml` к виду:
+~~~yml
+---
+- name: MongoDB Bake
+  hosts: all
+  become: true
+
+  roles:
+    - db
+
+~~~
+
+Пересоздаем образы:
+~~~bash
+packer build -var-file=./packer/variables.json ./packer/app.json
+packer build -var-file=./packer/variables.json ./packer/db.json
+~~~
 
 # **Полезное:**
 
